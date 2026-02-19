@@ -78,7 +78,7 @@ public class AuthServiceImpl implements AuthService {
                 .token(refreshTokenValue)
                 .userUuid(user.getUuid())
                 .expiryDate(LocalDateTime.now()
-                        .plusMillis(refreshTokenExpiration))
+                        .plusSeconds(refreshTokenExpiration/1000))
                 .revoked(false)
                 .build();
 
