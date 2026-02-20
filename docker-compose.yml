@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  user-service:
+    build: ./user-service
+    ports:
+      - "8082:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  product-service:
+    build: ./product-service
+    ports:
+      - "8083:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "8084:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  review-service:
+    build: ./review-service
+    ports:
+      - "8085:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8086:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - user-service
+      - product-service
+      - order-service
+      - review-service
+      - payment-service
+    environment:
+      internal_secret: veryStrongInternalSecret123
+
+volumes:
+  pgdata:
+
