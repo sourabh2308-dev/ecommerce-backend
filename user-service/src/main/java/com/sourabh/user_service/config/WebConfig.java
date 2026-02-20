@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
 
         registry.addInterceptor(internalSecretInterceptor)
-                .addPathPatterns("/api/users/**");
+                .addPathPatterns("/api/user/**");
 
         registry.addInterceptor(roleInterceptor);
     }

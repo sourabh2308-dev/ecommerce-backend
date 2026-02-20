@@ -9,7 +9,7 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 @Configuration
 public class InternalSecretFilterConfig {
 
-    @Value("${internal_secret}")
+    @Value("${internal.secret}")
     private String internalSecret;
 
     @Bean

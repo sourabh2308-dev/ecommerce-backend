@@ -28,14 +28,14 @@ public class SecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/users/register",
-                                "/api/users/verify-otp",
-                                "/api/users/resend-otp",
-                                "/api/users/internal/**", 
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/webjars/**"
+                            "/api/user/register",
+                            "/api/user/verify-otp",
+                            "/api/user/resend-otp",
+                            "/api/user/internal/**",
+                            "/v3/api-docs/**",
+                            "/swagger-ui/**",
+                            "/swagger-ui.html",
+                            "/webjars/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 );

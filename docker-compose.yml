@@ -77,8 +77,7 @@ services:
       - order-service
       - review-service
       - payment-service
-    environment:
-      internal_secret: veryStrongInternalSecret123
+
 
 volumes:
   pgdata:
