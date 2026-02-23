@@ -1,7 +1,9 @@
 package com.sourabh.user_service.service.impl;
 
 import com.sourabh.user_service.common.PageResponse;
+import com.sourabh.user_service.dto.request.ChangePasswordRequest;
 import com.sourabh.user_service.dto.request.RegisterRequest;
+import com.sourabh.user_service.dto.request.UpdateProfileRequest;
 import com.sourabh.user_service.dto.request.VerifyOTPRequest;
 import com.sourabh.user_service.dto.response.InternalUserDto;
 import com.sourabh.user_service.dto.response.UserResponse;
@@ -318,7 +320,12 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         user.setDeleted(false);
-        user.setStatus(UserStatus.ACTIVE);
+        // Sellers need re-approval after being restored; buyers/admins go straight to ACTIVE
+        if (user.getRole() == Role.SELLER && !user.isApproved()) {
+            user.setStatus(UserStatus.PENDING_APPROVAL);
+        } else {
+            user.setStatus(UserStatus.ACTIVE);
+        }
 
         userRepository.save(user);
 
@@ -408,6 +415,87 @@ public class UserServiceImpl implements UserService {
                 .status(user.getStatus().name())
                 .emailVerified(user.isEmailVerified())
                 .build();
+    }
+
+    // ─────────────────────────────────────────────
+    // PROFILE MANAGEMENT (authenticated user)
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Cacheable(value = "usersByUuid", key = "#userUuid")
+    public UserResponse getProfile(String userUuid) {
+        log.debug("getProfile: uuid={}", userUuid);
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+        return mapToResponse(user);
+    }
+
+    @Override
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
+    public UserResponse updateProfile(String userUuid, UpdateProfileRequest request) {
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (request.getFirstName() != null)   user.setFirstName(request.getFirstName());
+        if (request.getLastName() != null)    user.setLastName(request.getLastName());
+        if (request.getPhoneNumber() != null) user.setPhoneNumber(request.getPhoneNumber());
+
+        userRepository.save(user);
+        log.info("Profile updated: uuid={}", userUuid);
+        return mapToResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public String changePassword(String userUuid, ChangePasswordRequest request) {
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new UserStateException("Current password is incorrect");
+        }
+        if (!request.getNewPassword().equals(request.getConfirmNewPassword())) {
+            throw new UserStateException("New passwords do not match");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+        log.info("Password changed: uuid={}", userUuid);
+        return "Password changed successfully";
+    }
+
+    // ─────────────────────────────────────────────
+    // UNBLOCK USER (Admin)
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
+    public String unblockUser(String userUuid) {
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (user.getStatus() != UserStatus.BLOCKED) {
+            throw new UserStateException("User is not blocked");
+        }
+
+        // Sellers who were blocked need re-approval unless already approved
+        if (user.getRole() == Role.SELLER && !user.isApproved()) {
+            user.setStatus(UserStatus.PENDING_APPROVAL);
+        } else {
+            user.setStatus(UserStatus.ACTIVE);
+        }
+
+        userRepository.save(user);
+        log.info("User unblocked: uuid={}", userUuid);
+        return "User unblocked successfully";
     }
 
 }

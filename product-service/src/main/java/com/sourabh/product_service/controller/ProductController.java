@@ -10,6 +10,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -23,17 +25,13 @@ public class ProductController {
     // =========================
     // CREATE PRODUCT (SELLER)
     // =========================
+    @PreAuthorize("hasRole('SELLER')")
     @PostMapping
     public ResponseEntity<ProductResponse> createProduct(
             @Valid @RequestBody CreateProductRequest request,
             HttpServletRequest httpRequest) {
 
-        String role = httpRequest.getHeader("X-User-Role");
         String sellerUuid = httpRequest.getHeader("X-User-UUID");
-
-        if (!"SELLER".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(403).build();
-        }
 
         ProductResponse response =
                 productService.createProduct(request, sellerUuid);
@@ -44,6 +42,7 @@ public class ProductController {
     // =========================
     // UPDATE PRODUCT
     // =========================
+    @PreAuthorize("hasAnyRole('SELLER', 'ADMIN')")
     @PutMapping("/{uuid}")
     public ResponseEntity<ProductResponse> updateProduct(
             @PathVariable String uuid,
@@ -62,44 +61,34 @@ public class ProductController {
     // =========================
     // APPROVE PRODUCT (ADMIN)
     // =========================
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/admin/approve/{uuid}")
-    public ResponseEntity<String> approveProduct(
-            @PathVariable String uuid,
-            HttpServletRequest httpRequest) {
-
-        String role = httpRequest.getHeader("X-User-Role");
-
-        if (!"ADMIN".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(403).build();
-        }
-
-        return ResponseEntity.ok(
-                productService.approveProduct(uuid)
-        );
+    public ResponseEntity<String> approveProduct(@PathVariable String uuid) {
+        return ResponseEntity.ok(productService.approveProduct(uuid));
     }
 
     // =========================
     // BLOCK PRODUCT (ADMIN)
     // =========================
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/admin/block/{uuid}")
-    public ResponseEntity<String> blockProduct(
-            @PathVariable String uuid,
-            HttpServletRequest httpRequest) {
+    public ResponseEntity<String> blockProduct(@PathVariable String uuid) {
+        return ResponseEntity.ok(productService.blockProduct(uuid));
+    }
 
-        String role = httpRequest.getHeader("X-User-Role");
-
-        if (!"ADMIN".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(403).build();
-        }
-
-        return ResponseEntity.ok(
-                productService.blockProduct(uuid)
-        );
+    // =========================
+    // UNBLOCK PRODUCT (ADMIN)
+    // =========================
+    @PreAuthorize("hasRole('ADMIN')")
+    @PutMapping("/admin/unblock/{uuid}")
+    public ResponseEntity<String> unblockProduct(@PathVariable String uuid) {
+        return ResponseEntity.ok(productService.unblockProduct(uuid));
     }
 
     // =========================
     // SOFT DELETE
     // =========================
+    @PreAuthorize("hasAnyRole('SELLER', 'ADMIN')")
     @DeleteMapping("/{uuid}")
     public ResponseEntity<String> deleteProduct(
             @PathVariable String uuid,
@@ -146,8 +135,11 @@ public class ProductController {
     // GET SINGLE PRODUCT
     // =========================
     @GetMapping("/{uuid}")
-    public ResponseEntity<ProductResponse> getProduct(@PathVariable String uuid) {
-        return ResponseEntity.ok(productService.getProductByUuid(uuid));
+    public ResponseEntity<ProductResponse> getProduct(
+            @PathVariable String uuid,
+            HttpServletRequest httpRequest) {
+        String role = httpRequest.getHeader("X-User-Role");
+        return ResponseEntity.ok(productService.getProductByUuid(uuid, role));
     }
 
     @PutMapping("/internal/reduce-stock/{uuid}")
@@ -157,6 +149,16 @@ public class ProductController {
 
         return ResponseEntity.ok(
                 productService.reduceStock(uuid, quantity)
+        );
+    }
+
+    @PutMapping("/internal/restore-stock/{uuid}")
+    public ResponseEntity<String> restoreStock(
+            @PathVariable String uuid,
+            @RequestParam Integer quantity) {
+
+        return ResponseEntity.ok(
+                productService.restoreStock(uuid, quantity)
         );
     }
 

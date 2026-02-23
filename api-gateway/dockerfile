@@ -11,6 +11,8 @@ COPY product-service/pom.xml product-service/
 COPY order-service/pom.xml order-service/
 COPY review-service/pom.xml review-service/
 COPY payment-service/pom.xml payment-service/
+COPY eureka-server/pom.xml eureka-server/
+COPY config-server/pom.xml config-server/
 RUN mvn -pl api-gateway dependency:go-offline -B --no-transfer-progress || true
 
 # Copy source and build only this service

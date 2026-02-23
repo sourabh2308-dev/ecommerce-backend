@@ -50,6 +50,7 @@ public class ProductServiceImpl implements ProductService {
                 .sellerUuid(sellerUuid)
                 .status(ProductStatus.DRAFT)
                 .isDeleted(false)
+                .imageUrl(request.getImageUrl())
                 .build();
 
         productRepository.save(product);
@@ -102,6 +103,9 @@ public class ProductServiceImpl implements ProductService {
         if (request.getCategory() != null)
             product.setCategory(request.getCategory());
 
+        if (request.getImageUrl() != null)
+            product.setImageUrl(request.getImageUrl());
+
         productRepository.save(product);
 
         log.info("Product updated: uuid={}, by role={}, sellerUuid={}", uuid, role, sellerUuid);
@@ -144,6 +148,30 @@ public class ProductServiceImpl implements ProductService {
 
         log.info("Product blocked: uuid={}", uuid);
         return "Product blocked";
+    }
+
+    // ===============================
+    // UNBLOCK PRODUCT (ADMIN)
+    // ===============================
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "products", key = "#uuid")
+    public String unblockProduct(String uuid) {
+
+        Product product = productRepository
+                .findByUuidAndIsDeletedFalse(uuid)
+                .orElseThrow(() -> new ProductNotFoundException("Product not found"));
+
+        if (product.getStatus() != ProductStatus.BLOCKED) {
+            throw new ProductStateException("Product is not blocked");
+        }
+        // Return to DRAFT so seller must resubmit for approval
+        product.setStatus(ProductStatus.DRAFT);
+        productRepository.save(product);
+
+        log.info("Product unblocked (set to DRAFT): uuid={}", uuid);
+        return "Product unblocked and set back to DRAFT for re-approval";
     }
 
     // ===============================
@@ -247,11 +275,18 @@ public class ProductServiceImpl implements ProductService {
     // ===============================
     @Override
     @Cacheable(value = "products", key = "#uuid")
-    public ProductResponse getProductByUuid(String uuid) {
+    public ProductResponse getProductByUuid(String uuid, String role) {
         log.debug("Cache miss for product uuid={} — fetching from DB", uuid);
         Product product = productRepository
                 .findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new ProductNotFoundException("Product not found: " + uuid));
+
+        // Buyers and unauthenticated callers only see ACTIVE products
+        boolean isPrivileged = "ADMIN".equalsIgnoreCase(role) || "SELLER".equalsIgnoreCase(role);
+        if (!isPrivileged && product.getStatus() != ProductStatus.ACTIVE) {
+            throw new ProductNotFoundException("Product not found: " + uuid);
+        }
+
         return mapToResponse(product);
     }
 
@@ -271,6 +306,7 @@ public class ProductServiceImpl implements ProductService {
                 .status(product.getStatus().name())
                 .averageRating(product.getAverageRating())
                 .totalReviews(product.getTotalReviews())
+                .imageUrl(product.getImageUrl())
                 .build();
     }
 
@@ -321,6 +357,30 @@ public class ProductServiceImpl implements ProductService {
         log.info("Stock reduced for product uuid={} by quantity={}, remaining={}",
                 productUuid, quantity, product.getStock());
         return "Stock reduced successfully";
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "products", key = "#productUuid")
+    public String restoreStock(String productUuid, Integer quantity) {
+
+        Product product = productRepository
+                .findByUuidAndIsDeletedFalse(productUuid)
+                .orElseThrow(() ->
+                        new ProductNotFoundException("Product not found"));
+
+        product.setStock(product.getStock() + quantity);
+
+        // If the product was out of stock, make it active again
+        if (product.getStatus() == ProductStatus.OUT_OF_STOCK && product.getStock() > 0) {
+            product.setStatus(ProductStatus.ACTIVE);
+        }
+
+        productRepository.save(product);
+
+        log.info("Stock restored for product uuid={} by quantity={}, new stock={}",
+                productUuid, quantity, product.getStock());
+        return "Stock restored successfully";
     }
 
     @Override

@@ -23,5 +23,8 @@ public class UpdateProductRequest {
     private Integer stock;
 
     private String category;
+
+    @Size(max = 1000)
+    private String imageUrl;
 }
 

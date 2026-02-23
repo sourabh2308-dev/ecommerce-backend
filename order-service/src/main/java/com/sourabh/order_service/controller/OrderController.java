@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -22,6 +23,7 @@ public class OrderController {
     // =========================
     // CREATE ORDER (BUYER)
     // =========================
+    @PreAuthorize("hasRole('BUYER')")
     @PostMapping
     public ResponseEntity<OrderResponse> createOrder(
             @Valid @RequestBody CreateOrderRequest request,
@@ -54,24 +56,21 @@ public class OrderController {
         return ResponseEntity.ok(response);
     }
 
+    @PreAuthorize("hasRole('SELLER')")
     @GetMapping("/seller")
     public ResponseEntity<PageResponse<OrderResponse>> sellerOrders(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             HttpServletRequest request) {
 
-        String role = request.getHeader("X-User-Role");
         String sellerUuid = request.getHeader("X-User-UUID");
-
-        if (!"SELLER".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(
                 orderService.listSellerOrders(page, size, sellerUuid)
         );
     }
 
+    @PreAuthorize("hasAnyRole('BUYER', 'ADMIN')")
     @PutMapping("/{uuid}/status")
     public ResponseEntity<OrderResponse> updateStatus(
             @PathVariable String uuid,
@@ -82,12 +81,7 @@ public class OrderController {
         String userUuid = request.getHeader("X-User-UUID");
 
         return ResponseEntity.ok(
-                orderService.updateOrderStatus(
-                        uuid,
-                        role,
-                        userUuid,
-                        status
-                )
+                orderService.updateOrderStatus(uuid, role, userUuid, status)
         );
     }
 
@@ -105,9 +99,11 @@ public class OrderController {
     // =========================
     @GetMapping("/{uuid}")
     public ResponseEntity<OrderResponse> getOrder(
-            @PathVariable String uuid) {
-
-        return ResponseEntity.ok(orderService.getOrderByUuid(uuid));
+            @PathVariable String uuid,
+            HttpServletRequest httpRequest) {
+        String role     = httpRequest.getHeader("X-User-Role");
+        String userUuid = httpRequest.getHeader("X-User-UUID");
+        return ResponseEntity.ok(orderService.getOrderByUuid(uuid, role, userUuid));
     }
 
 }

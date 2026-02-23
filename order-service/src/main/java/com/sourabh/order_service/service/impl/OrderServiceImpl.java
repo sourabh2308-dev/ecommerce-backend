@@ -13,6 +13,7 @@ import com.sourabh.order_service.exception.OrderAccessException;
 import com.sourabh.order_service.exception.OrderNotFoundException;
 import com.sourabh.order_service.exception.OrderStateException;
 import com.sourabh.order_service.feign.ProductServiceClient;
+import com.sourabh.order_service.kafka.event.OrderCreatedEvent;
 import com.sourabh.order_service.repository.OrderRepository;
 import com.sourabh.order_service.service.OrderService;
 import feign.FeignException;
@@ -24,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +39,9 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductServiceClient productServiceClient;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    private static final String TOPIC_ORDER_CREATED = "order.created";
 
     @Override
     @Transactional
@@ -80,7 +85,13 @@ public class OrderServiceImpl implements OrderService {
         order.setItems(List.of(item));
         orderRepository.save(order);
 
-        log.info("Order created: orderUuid={}, productUuid={}", order.getUuid(), product.getUuid());
+        // Saga: publish order.created so payment-service can auto-process payment
+        kafkaTemplate.send(TOPIC_ORDER_CREATED,
+                new OrderCreatedEvent(order.getUuid(), buyerUuid, product.getUuid(),
+                        request.getQuantity(), totalAmount));
+
+        log.info("Order created and order.created event published: orderUuid={}, productUuid={}",
+                order.getUuid(), product.getUuid());
         return mapToResponse(order);
     }
 
@@ -124,11 +135,17 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Cacheable(value = "orders", key = "#uuid")
-    public OrderResponse getOrderByUuid(String uuid) {
+    public OrderResponse getOrderByUuid(String uuid, String role, String userUuid) {
         log.debug("Cache miss for order uuid={} — fetching from DB", uuid);
-        return orderRepository.findByUuidAndIsDeletedFalse(uuid)
-                .map(this::mapToResponse)
+        Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
+
+        // Buyers can only see their own orders
+        if ("BUYER".equalsIgnoreCase(role) && !order.getBuyerUuid().equals(userUuid)) {
+            throw new OrderAccessException("You can only view your own orders");
+        }
+
+        return mapToResponse(order);
     }
 
     @Override
@@ -165,6 +182,21 @@ public class OrderServiceImpl implements OrderService {
         }
         order.setStatus(OrderStatus.CANCELLED);
         orderRepository.save(order);
+
+        // Saga compensation: restore stock for all items
+        if (order.getItems() != null) {
+            order.getItems().forEach(item -> {
+                try {
+                    productServiceClient.restoreStock(item.getProductUuid(), item.getQuantity());
+                    log.info("Stock restored for cancelled order: productUuid={}, qty={}",
+                            item.getProductUuid(), item.getQuantity());
+                } catch (Exception e) {
+                    log.error("Failed to restore stock for productUuid={}: {}",
+                            item.getProductUuid(), e.getMessage());
+                }
+            });
+        }
+
         log.info("Order cancelled by buyer: uuid={}", order.getUuid());
         return mapToResponse(order);
     }
@@ -232,6 +264,8 @@ public class OrderServiceImpl implements OrderService {
                 .status(order.getStatus().name())
                 .paymentStatus(order.getPaymentStatus().name())
                 .items(itemResponses)
+                .createdAt(order.getCreatedAt())
+                .updatedAt(order.getUpdatedAt())
                 .build();
     }
 }

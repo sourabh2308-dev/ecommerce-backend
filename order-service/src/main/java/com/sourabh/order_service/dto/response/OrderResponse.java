@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.extern.jackson.Jacksonized;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Getter
@@ -17,5 +18,7 @@ public class OrderResponse {
     private String status;
     private String paymentStatus;
     private List<OrderItemResponse> items;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }
 

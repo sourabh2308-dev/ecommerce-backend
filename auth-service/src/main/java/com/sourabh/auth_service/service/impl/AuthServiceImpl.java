@@ -157,4 +157,21 @@ public class AuthServiceImpl implements AuthService {
                 .tokenType("Bearer")
                 .build();
     }
+
+    // ─────────────────────────────────────────────
+    // LOGOUT — revoke the supplied refresh token
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public void logout(String refreshTokenValue) {
+        RefreshToken refreshToken = refreshTokenRepository.findByToken(refreshTokenValue)
+                .orElseThrow(() -> new AuthException("Invalid refresh token"));
+
+        if (!refreshToken.isRevoked()) {
+            refreshToken.setRevoked(true);
+            refreshTokenRepository.save(refreshToken);
+            log.info("User logged out: userUuid={}", refreshToken.getUserUuid());
+        }
+    }
 }

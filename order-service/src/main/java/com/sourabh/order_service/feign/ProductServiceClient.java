@@ -20,4 +20,10 @@ public interface ProductServiceClient {
 
     @PutMapping("/api/product/internal/reduce-stock/{uuid}")
     void reduceStock(@PathVariable("uuid") String uuid, @RequestParam("quantity") int quantity);
+
+    /**
+     * Saga compensation: restore stock when payment fails.
+     */
+    @PutMapping("/api/product/internal/restore-stock/{uuid}")
+    void restoreStock(@PathVariable("uuid") String uuid, @RequestParam("quantity") int quantity);
 }

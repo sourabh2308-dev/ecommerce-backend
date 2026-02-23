@@ -30,6 +30,11 @@ public interface OrderService {
 
     void updatePaymentStatus(String uuid, String status);
 
-    OrderResponse getOrderByUuid(String uuid);
+    /**
+     * Fetch a single order.
+     * BUYER: may only see their own orders.
+     * ADMIN / SELLER / null (internal service call): may see any order.
+     */
+    OrderResponse getOrderByUuid(String uuid, String role, String userUuid);
 
 }

@@ -1,9 +1,11 @@
 package com.sourabh.user_service;
 
 import org.springframework.boot.SpringApplication;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
+@EnableJpaAuditing
 public class UserServiceApplication {
 
 	public static void main(String[] args) {

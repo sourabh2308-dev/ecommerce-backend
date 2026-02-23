@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +35,7 @@ class OrderServiceImplTest {
 
     @Mock private OrderRepository orderRepository;
     @Mock private ProductServiceClient productServiceClient;
+    @Mock private KafkaTemplate<String, Object> kafkaTemplate;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -122,7 +124,7 @@ class OrderServiceImplTest {
         when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid"))
                 .thenReturn(Optional.of(sampleOrder));
 
-        OrderResponse response = orderService.getOrderByUuid("order-uuid");
+        OrderResponse response = orderService.getOrderByUuid("order-uuid", "ADMIN", "admin-uuid");
 
         assertThat(response.getUuid()).isEqualTo("order-uuid");
     }
@@ -133,7 +135,7 @@ class OrderServiceImplTest {
         when(orderRepository.findByUuidAndIsDeletedFalse("bad-uuid"))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> orderService.getOrderByUuid("bad-uuid"))
+        assertThatThrownBy(() -> orderService.getOrderByUuid("bad-uuid", "ADMIN", "admin-uuid"))
                 .isInstanceOf(OrderNotFoundException.class);
     }
 

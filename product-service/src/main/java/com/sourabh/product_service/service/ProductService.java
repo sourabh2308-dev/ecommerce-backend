@@ -18,6 +18,8 @@ public interface ProductService {
 
     String blockProduct(String uuid);
 
+    String unblockProduct(String uuid);
+
     String softDeleteProduct(String uuid, String role, String sellerUuid);
 
     PageResponse<ProductResponse> listProducts(
@@ -29,9 +31,17 @@ public interface ProductService {
             String sellerUuid,
             String keyword);
 
-    ProductResponse getProductByUuid(String uuid);
+    /**
+     * Returns a product by UUID.
+     * Buyers and unauthenticated callers (role = null) only see ACTIVE products.
+     * SELLER / ADMIN see any non-deleted product.
+     */
+    ProductResponse getProductByUuid(String uuid, String role);
 
     String reduceStock(String productUuid, Integer quantity);
+
+    /** Saga compensation: restore stock after a failed payment. */
+    String restoreStock(String productUuid, Integer quantity);
 
     void updateRating(String productUuid, Integer rating);
 

@@ -25,4 +25,7 @@ public class CreateProductRequest {
 
     @NotBlank
     private String category;
+
+    @Size(max = 1000)
+    private String imageUrl;
 }

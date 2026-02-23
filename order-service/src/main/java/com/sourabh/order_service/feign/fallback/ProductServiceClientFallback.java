@@ -17,4 +17,10 @@ public class ProductServiceClientFallback implements ProductServiceClient {
     public void reduceStock(String uuid, int quantity) {
         throw new OrderStateException("Product service is currently unavailable. Stock could not be reduced.");
     }
+
+    @Override
+    public void restoreStock(String uuid, int quantity) {
+        // Best-effort: log and continue. A real implementation would use an outbox/retry mechanism.
+        throw new OrderStateException("Product service is currently unavailable. Stock could not be restored.");
+    }
 }

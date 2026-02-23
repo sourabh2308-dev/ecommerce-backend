@@ -26,6 +26,11 @@ public class GlobalExceptionHandler {
         return buildError("PAYMENT_ACCESS_DENIED", ex.getMessage(), HttpStatus.FORBIDDEN);
     }
 
+    @ExceptionHandler(PaymentNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(PaymentNotFoundException ex) {
+        return buildError("PAYMENT_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<String> errors = ex.getBindingResult()

@@ -19,4 +19,5 @@ public class ProductResponse {
     private String status;
     private Double averageRating;
     private Integer totalReviews;
+    private String imageUrl;
 }

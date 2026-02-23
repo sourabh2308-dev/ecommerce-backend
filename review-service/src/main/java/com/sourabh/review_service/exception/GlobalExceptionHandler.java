@@ -31,6 +31,11 @@ public class GlobalExceptionHandler {
         return buildError("REVIEW_ACCESS_DENIED", ex.getMessage(), HttpStatus.FORBIDDEN);
     }
 
+    @ExceptionHandler(ReviewNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(ReviewNotFoundException ex) {
+        return buildError("REVIEW_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<String> errors = ex.getBindingResult()
