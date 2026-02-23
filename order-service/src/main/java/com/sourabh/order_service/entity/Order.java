@@ -33,6 +33,7 @@ public class Order extends BaseAuditEntity {
     @Enumerated(EnumType.STRING)
     private PaymentStatus paymentStatus;
 
+    @Builder.Default
     private Boolean isDeleted = false;
 
     @OneToMany(mappedBy = "order",

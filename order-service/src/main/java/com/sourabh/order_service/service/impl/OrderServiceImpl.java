@@ -3,24 +3,28 @@ package com.sourabh.order_service.service.impl;
 import com.sourabh.order_service.common.PageResponse;
 import com.sourabh.order_service.dto.ProductDto;
 import com.sourabh.order_service.dto.request.CreateOrderRequest;
+import com.sourabh.order_service.dto.response.OrderItemResponse;
 import com.sourabh.order_service.dto.response.OrderResponse;
 import com.sourabh.order_service.entity.Order;
 import com.sourabh.order_service.entity.OrderItem;
 import com.sourabh.order_service.entity.OrderStatus;
 import com.sourabh.order_service.entity.PaymentStatus;
+import com.sourabh.order_service.exception.OrderAccessException;
+import com.sourabh.order_service.exception.OrderNotFoundException;
+import com.sourabh.order_service.exception.OrderStateException;
+import com.sourabh.order_service.feign.ProductServiceClient;
 import com.sourabh.order_service.repository.OrderRepository;
 import com.sourabh.order_service.service.OrderService;
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -32,62 +36,30 @@ import java.util.UUID;
 public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
-    private final RestTemplate restTemplate;
-
-    private static final String PRODUCT_SERVICE_URL =
-            "http://localhost:8083/api/products/";
+    private final ProductServiceClient productServiceClient;
 
     @Override
     @Transactional
-    public OrderResponse createOrder(
-            CreateOrderRequest request,
-            String role,
-            String buyerUuid) {
+    public OrderResponse createOrder(CreateOrderRequest request, String role, String buyerUuid) {
 
         if (!"BUYER".equalsIgnoreCase(role)) {
-            throw new RuntimeException("Only buyers can place orders");
+            throw new OrderAccessException("Only buyers can place orders");
         }
 
-        // 1️⃣ Fetch product
-        ProductDto product = restTemplate.getForObject(
-                PRODUCT_SERVICE_URL + request.getProductUuid(),
-                ProductDto.class
-        );
-
-        if (product == null) {
-            throw new RuntimeException("Product not found");
-        }
+        ProductDto product = fetchProduct(request.getProductUuid());
 
         if (!"ACTIVE".equalsIgnoreCase(product.getStatus())) {
-            throw new RuntimeException("Product is not active");
+            throw new OrderStateException("Product is not active");
         }
 
-        // 2️⃣ Call Product Service to reduce stock
-        String reduceStockUrl =
-                PRODUCT_SERVICE_URL +
-                        "internal/reduce-stock/" +
-                        request.getProductUuid() +
-                        "?quantity=" +
-                        request.getQuantity();
+        try {
+            productServiceClient.reduceStock(request.getProductUuid(), request.getQuantity());
+        } catch (FeignException e) {
+            throw new OrderStateException("Failed to reduce product stock: " + e.getMessage());
+        }
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-Internal-Secret", "veryStrongInternalSecret123");
+        double totalAmount = product.getPrice() * request.getQuantity();
 
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-        restTemplate.exchange(
-                reduceStockUrl,
-                HttpMethod.PUT,
-                entity,
-                String.class
-        );
-
-
-        // 3️⃣ Calculate total
-        double totalAmount =
-                product.getPrice() * request.getQuantity();
-
-        // 4️⃣ Create order
         Order order = Order.builder()
                 .uuid(UUID.randomUUID().toString())
                 .buyerUuid(buyerUuid)
@@ -106,43 +78,130 @@ public class OrderServiceImpl implements OrderService {
                 .build();
 
         order.setItems(List.of(item));
-
         orderRepository.save(order);
 
-        log.info("Order created and stock deducted for product: {}",
-                product.getUuid());
-
+        log.info("Order created: orderUuid={}, productUuid={}", order.getUuid(), product.getUuid());
         return mapToResponse(order);
     }
 
+    @Override
+    public PageResponse<OrderResponse> listOrders(int page, int size, String role, String buyerUuid) {
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+        Page<Order> orderPage = "BUYER".equalsIgnoreCase(role)
+                ? orderRepository.findByBuyerUuidAndIsDeletedFalse(buyerUuid, pageable)
+                : orderRepository.findByIsDeletedFalse(pageable);
+
+        return toPageResponse(orderPage);
+    }
 
     @Override
-    public PageResponse<OrderResponse> listOrders(
-            int page,
-            int size,
-            String role,
-            String buyerUuid) {
+    public PageResponse<OrderResponse> listSellerOrders(int page, int size, String sellerUuid) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return toPageResponse(orderRepository.findOrdersBySeller(sellerUuid, pageable));
+    }
 
-        Pageable pageable = PageRequest.of(page, size,
-                Sort.by("createdAt").descending());
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", key = "#uuid")
+    public OrderResponse updateOrderStatus(String uuid, String role, String buyerUuid, String newStatus) {
 
-        Page<Order> orderPage;
+        Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
+                .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
+
+        OrderStatus requestedStatus = OrderStatus.valueOf(newStatus.toUpperCase());
 
         if ("BUYER".equalsIgnoreCase(role)) {
-            orderPage =
-                    orderRepository.findByBuyerUuidAndIsDeletedFalse(
-                            buyerUuid,
-                            pageable);
-        } else {
-            orderPage =
-                    orderRepository.findAll(pageable);
+            return cancelByBuyer(order, buyerUuid, requestedStatus);
+        }
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return advanceByAdmin(order, requestedStatus);
         }
 
-        List<OrderResponse> responses =
-                orderPage.getContent()
-                        .stream()
-                        .map(this::mapToResponse)
-                        .toList();
+        throw new OrderAccessException("Unauthorized action");
+    }
+
+    @Override
+    @Cacheable(value = "orders", key = "#uuid")
+    public OrderResponse getOrderByUuid(String uuid) {
+        log.debug("Cache miss for order uuid={} — fetching from DB", uuid);
+        return orderRepository.findByUuidAndIsDeletedFalse(uuid)
+                .map(this::mapToResponse)
+                .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", key = "#uuid")
+    public void updatePaymentStatus(String uuid, String status) {
+        Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
+                .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
+
+        PaymentStatus paymentStatus = PaymentStatus.valueOf(status);
+        order.setPaymentStatus(paymentStatus);
+
+        if (paymentStatus == PaymentStatus.FAILED) {
+            order.setStatus(OrderStatus.CANCELLED);
+        }
+
+        orderRepository.save(order);
+        log.info("Payment status updated: orderUuid={}, paymentStatus={}", uuid, status);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────
+
+    private OrderResponse cancelByBuyer(Order order, String buyerUuid, OrderStatus requestedStatus) {
+        if (!order.getBuyerUuid().equals(buyerUuid)) {
+            throw new OrderAccessException("You can only modify your own order");
+        }
+        if (requestedStatus != OrderStatus.CANCELLED) {
+            throw new OrderStateException("Buyer can only cancel an order");
+        }
+        if (order.getStatus() != OrderStatus.CREATED) {
+            throw new OrderStateException("Order cannot be cancelled at this stage");
+        }
+        order.setStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
+        log.info("Order cancelled by buyer: uuid={}", order.getUuid());
+        return mapToResponse(order);
+    }
+
+    private OrderResponse advanceByAdmin(Order order, OrderStatus requestedStatus) {
+        OrderStatus current = order.getStatus();
+        OrderStatus expected = switch (current) {
+            case CREATED   -> OrderStatus.CONFIRMED;
+            case CONFIRMED -> OrderStatus.SHIPPED;
+            case SHIPPED   -> OrderStatus.DELIVERED;
+            default -> throw new OrderStateException("Order cannot transition further from: " + current);
+        };
+
+        if (requestedStatus != expected) {
+            throw new OrderStateException(
+                    "Invalid transition from " + current + " to " + requestedStatus + ". Expected: " + expected);
+        }
+
+        order.setStatus(requestedStatus);
+        orderRepository.save(order);
+        log.info("Order status updated by admin: uuid={}, newStatus={}", order.getUuid(), requestedStatus);
+        return mapToResponse(order);
+    }
+
+    private ProductDto fetchProduct(String productUuid) {
+        try {
+            return productServiceClient.getProduct(productUuid);
+        } catch (FeignException.NotFound e) {
+            throw new OrderStateException("Product not found: " + productUuid);
+        }
+    }
+
+    private PageResponse<OrderResponse> toPageResponse(Page<Order> orderPage) {
+        List<OrderResponse> responses = orderPage.getContent()
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
 
         return PageResponse.<OrderResponse>builder()
                 .content(responses)
@@ -155,6 +214,16 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private OrderResponse mapToResponse(Order order) {
+        List<OrderItemResponse> itemResponses = order.getItems() == null
+                ? List.of()
+                : order.getItems().stream()
+                        .map(item -> OrderItemResponse.builder()
+                                .productUuid(item.getProductUuid())
+                                .sellerUuid(item.getSellerUuid())
+                                .price(item.getPrice())
+                                .quantity(item.getQuantity())
+                                .build())
+                        .toList();
 
         return OrderResponse.builder()
                 .uuid(order.getUuid())
@@ -162,138 +231,7 @@ public class OrderServiceImpl implements OrderService {
                 .totalAmount(order.getTotalAmount())
                 .status(order.getStatus().name())
                 .paymentStatus(order.getPaymentStatus().name())
+                .items(itemResponses)
                 .build();
     }
-
-    @Override
-    public PageResponse<OrderResponse> listSellerOrders(
-            int page,
-            int size,
-            String sellerUuid) {
-
-        Pageable pageable = PageRequest.of(page, size,
-                Sort.by("createdAt").descending());
-
-        Page<Order> orderPage =
-                orderRepository.findOrdersBySeller(
-                        sellerUuid,
-                        pageable);
-
-        List<OrderResponse> responses =
-                orderPage.getContent()
-                        .stream()
-                        .map(this::mapToResponse)
-                        .toList();
-
-        return PageResponse.<OrderResponse>builder()
-                .content(responses)
-                .page(orderPage.getNumber())
-                .size(orderPage.getSize())
-                .totalElements(orderPage.getTotalElements())
-                .totalPages(orderPage.getTotalPages())
-                .last(orderPage.isLast())
-                .build();
-    }
-
-    @Override
-    @Transactional
-    public OrderResponse updateOrderStatus(
-            String uuid,
-            String role,
-            String buyerUuid,
-            String newStatus) {
-
-        Order order = orderRepository
-                .findByUuidAndIsDeletedFalse(uuid)
-                .orElseThrow(() ->
-                        new RuntimeException("Order not found"));
-
-        OrderStatus requestedStatus =
-                OrderStatus.valueOf(newStatus.toUpperCase());
-
-        // =========================
-        // BUYER CANCEL LOGIC
-        // =========================
-        if ("BUYER".equalsIgnoreCase(role)) {
-
-            if (!order.getBuyerUuid().equals(buyerUuid)) {
-                throw new RuntimeException(
-                        "You can only modify your own order");
-            }
-
-            if (requestedStatus != OrderStatus.CANCELLED) {
-                throw new RuntimeException(
-                        "Buyer can only cancel order");
-            }
-
-            if (order.getStatus() != OrderStatus.CREATED) {
-                throw new RuntimeException(
-                        "Order cannot be cancelled now");
-            }
-
-            order.setStatus(OrderStatus.CANCELLED);
-            orderRepository.save(order);
-
-            return mapToResponse(order);
-        }
-
-        // =========================
-        // ADMIN LIFECYCLE LOGIC
-        // =========================
-        if ("ADMIN".equalsIgnoreCase(role)) {
-
-            switch (order.getStatus()) {
-
-                case CREATED -> {
-                    if (requestedStatus != OrderStatus.CONFIRMED)
-                        throw new RuntimeException(
-                                "Invalid transition");
-                }
-
-                case CONFIRMED -> {
-                    if (requestedStatus != OrderStatus.SHIPPED)
-                        throw new RuntimeException(
-                                "Invalid transition");
-                }
-
-                case SHIPPED -> {
-                    if (requestedStatus != OrderStatus.DELIVERED)
-                        throw new RuntimeException(
-                                "Invalid transition");
-                }
-
-                default -> throw new RuntimeException(
-                        "Order cannot transition further");
-            }
-
-            order.setStatus(requestedStatus);
-            orderRepository.save(order);
-
-            return mapToResponse(order);
-        }
-
-        throw new RuntimeException("Unauthorized action");
-    }
-
-    @Override
-    @Transactional
-    public void updatePaymentStatus(String uuid, String status) {
-
-        Order order = orderRepository
-                .findByUuidAndIsDeletedFalse(uuid)
-                .orElseThrow(() ->
-                        new RuntimeException("Order not found"));
-
-        PaymentStatus paymentStatus =
-                PaymentStatus.valueOf(status);
-
-        order.setPaymentStatus(paymentStatus);
-
-        if (paymentStatus == PaymentStatus.FAILED) {
-            order.setStatus(OrderStatus.CANCELLED);
-        }
-
-        orderRepository.save(order);
-    }
-
 }

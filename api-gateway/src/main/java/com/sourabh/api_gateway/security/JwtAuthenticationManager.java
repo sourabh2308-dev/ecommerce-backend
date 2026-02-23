@@ -2,7 +2,7 @@ package com.sourabh.api_gateway.security;
 
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -14,7 +14,8 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
-public class JwtAuthenticationManager implements org.springframework.security.authentication.ReactiveAuthenticationManager {
+public class JwtAuthenticationManager implements
+        org.springframework.security.authentication.ReactiveAuthenticationManager {
 
     private final JwtUtil jwtUtil;
 
@@ -34,17 +35,20 @@ public class JwtAuthenticationManager implements org.springframework.security.au
             List<SimpleGrantedAuthority> authorities =
                     List.of(new SimpleGrantedAuthority("ROLE_" + role));
 
-            Authentication auth =
+            UsernamePasswordAuthenticationToken auth =
                     new UsernamePasswordAuthenticationToken(
                             email,
                             null,
                             authorities
                     );
+            // Store uuid so ClaimsForwardingFilter can read it without re-parsing
+            auth.setDetails(uuid);
 
             return Mono.just(auth);
 
         } catch (Exception e) {
-            return Mono.empty();
+            // Return error so Spring Security properly sends 401 Unauthorized
+            return Mono.error(new BadCredentialsException("Invalid or expired JWT token"));
         }
     }
 }

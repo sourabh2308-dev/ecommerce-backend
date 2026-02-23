@@ -29,6 +29,8 @@ public interface ProductService {
             String sellerUuid,
             String keyword);
 
+    ProductResponse getProductByUuid(String uuid);
+
     String reduceStock(String productUuid, Integer quantity);
 
     void updateRating(String productUuid, Integer rating);

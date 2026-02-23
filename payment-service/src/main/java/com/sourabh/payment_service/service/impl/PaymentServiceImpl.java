@@ -3,15 +3,15 @@ package com.sourabh.payment_service.service.impl;
 import com.sourabh.payment_service.dto.PaymentRequest;
 import com.sourabh.payment_service.entity.Payment;
 import com.sourabh.payment_service.entity.PaymentStatus;
+import com.sourabh.payment_service.exception.PaymentAccessException;
+import com.sourabh.payment_service.kafka.event.PaymentCompletedEvent;
 import com.sourabh.payment_service.repository.PaymentRepository;
 import com.sourabh.payment_service.service.PaymentService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -19,21 +19,29 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Slf4j
 public class PaymentServiceImpl implements PaymentService {
 
     private final PaymentRepository paymentRepository;
-    private final RestTemplate restTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    private static final String ORDER_SERVICE_URL =
-            "http://localhost:8084/api/orders/internal/payment-update/";
+    private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
 
     @Override
-    public String initiatePayment(PaymentRequest request) {
+    public String initiatePayment(PaymentRequest request, String role, String buyerUuid) {
+
+        if (!"BUYER".equalsIgnoreCase(role)) {
+            throw new PaymentAccessException("Only buyers can initiate payments");
+        }
+
+        request.setBuyerUuid(buyerUuid);
+
+        String paymentUuid = UUID.randomUUID().toString();
 
         Payment payment = Payment.builder()
-                .uuid(UUID.randomUUID().toString())
+                .uuid(paymentUuid)
                 .orderUuid(request.getOrderUuid())
-                .buyerUuid(request.getBuyerUuid())
+                .buyerUuid(buyerUuid)
                 .amount(request.getAmount())
                 .status(PaymentStatus.INITIATED)
                 .createdAt(LocalDateTime.now())
@@ -41,32 +49,19 @@ public class PaymentServiceImpl implements PaymentService {
 
         paymentRepository.save(payment);
 
-        // Simulate payment processing
+        // Simulate payment gateway
         boolean success = Math.random() > 0.2;
-
-        payment.setStatus(
-                success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED);
-
+        PaymentStatus finalStatus = success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
+        payment.setStatus(finalStatus);
         paymentRepository.save(payment);
 
-        // Notify Order Service
-        String url = ORDER_SERVICE_URL
-                + request.getOrderUuid()
-                + "?status=" + payment.getStatus().name();
+        log.info("Payment processed: orderUuid={}, status={}", request.getOrderUuid(), finalStatus);
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-Internal-Secret",
-                "veryStrongInternalSecret123");
+        // Notify order-service asynchronously via Kafka
+        kafkaTemplate.send(TOPIC_PAYMENT_COMPLETED,
+                new PaymentCompletedEvent(request.getOrderUuid(), finalStatus.name(), paymentUuid));
 
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-        restTemplate.exchange(
-                url,
-                HttpMethod.PUT,
-                entity,
-                Void.class
-        );
-
-        return "Payment " + payment.getStatus().name();
+        log.info("PaymentCompletedEvent published: orderUuid={}, status={}", request.getOrderUuid(), finalStatus);
+        return "Payment " + finalStatus.name();
     }
 }

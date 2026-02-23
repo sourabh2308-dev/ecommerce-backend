@@ -3,6 +3,7 @@ package com.sourabh.user_service.service;
 import com.sourabh.user_service.common.PageResponse;
 import com.sourabh.user_service.dto.request.RegisterRequest;
 import com.sourabh.user_service.dto.request.VerifyOTPRequest;
+import com.sourabh.user_service.dto.response.InternalUserDto;
 import com.sourabh.user_service.dto.response.UserResponse;
 
 public interface UserService {
@@ -39,7 +40,9 @@ public interface UserService {
 
     String resendOTP(String email);
 
+    /** Used by internal controller - auth-service calls these endpoints */
+    InternalUserDto getUserByEmailInternal(String email);
 
-
-
+    InternalUserDto getUserByUuidInternal(String uuid);
 }
+

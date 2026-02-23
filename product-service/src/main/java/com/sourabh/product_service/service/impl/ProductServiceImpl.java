@@ -16,6 +16,8 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,6 +65,7 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "products", key = "#uuid")
     public ProductResponse updateProduct(
             String uuid,
             UpdateProductRequest request,
@@ -101,15 +104,15 @@ public class ProductServiceImpl implements ProductService {
 
         productRepository.save(product);
 
+        log.info("Product updated: uuid={}, by role={}, sellerUuid={}", uuid, role, sellerUuid);
+
         return mapToResponse(product);
     }
-
-    // ===============================
-    // APPROVE PRODUCT (ADMIN)
     // ===============================
 
     @Override
     @Transactional
+    @CacheEvict(value = "products", key = "#uuid")
     public String approveProduct(String uuid) {
 
         Product product = productRepository
@@ -119,6 +122,7 @@ public class ProductServiceImpl implements ProductService {
         product.setStatus(ProductStatus.ACTIVE);
         productRepository.save(product);
 
+        log.info("Product approved: uuid={}", uuid);
         return "Product approved";
     }
 
@@ -128,6 +132,7 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "products", key = "#uuid")
     public String blockProduct(String uuid) {
 
         Product product = productRepository
@@ -137,6 +142,7 @@ public class ProductServiceImpl implements ProductService {
         product.setStatus(ProductStatus.BLOCKED);
         productRepository.save(product);
 
+        log.info("Product blocked: uuid={}", uuid);
         return "Product blocked";
     }
 
@@ -146,6 +152,7 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "products", key = "#uuid")
     public String softDeleteProduct(
             String uuid,
             String role,
@@ -163,6 +170,7 @@ public class ProductServiceImpl implements ProductService {
         product.setIsDeleted(true);
         productRepository.save(product);
 
+        log.info("Product soft-deleted: uuid={}, by role={}", uuid, role);
         return "Product deleted";
     }
 
@@ -237,6 +245,16 @@ public class ProductServiceImpl implements ProductService {
     }
 
     // ===============================
+    @Override
+    @Cacheable(value = "products", key = "#uuid")
+    public ProductResponse getProductByUuid(String uuid) {
+        log.debug("Cache miss for product uuid={} — fetching from DB", uuid);
+        Product product = productRepository
+                .findByUuidAndIsDeletedFalse(uuid)
+                .orElseThrow(() -> new ProductNotFoundException("Product not found: " + uuid));
+        return mapToResponse(product);
+    }
+
     // HELPER METHODS
     // ===============================
 
@@ -251,6 +269,8 @@ public class ProductServiceImpl implements ProductService {
                 .category(product.getCategory())
                 .sellerUuid(product.getSellerUuid())
                 .status(product.getStatus().name())
+                .averageRating(product.getAverageRating())
+                .totalReviews(product.getTotalReviews())
                 .build();
     }
 
@@ -274,6 +294,7 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "products", key = "#productUuid")
     public String reduceStock(String productUuid, Integer quantity) {
 
         Product product = productRepository
@@ -297,11 +318,14 @@ public class ProductServiceImpl implements ProductService {
 
         productRepository.save(product);
 
+        log.info("Stock reduced for product uuid={} by quantity={}, remaining={}",
+                productUuid, quantity, product.getStock());
         return "Stock reduced successfully";
     }
 
     @Override
     @Transactional
+    @CacheEvict(value = "products", key = "#productUuid")
     public void updateRating(String productUuid, Integer rating) {
 
         Product product = productRepository
@@ -320,6 +344,9 @@ public class ProductServiceImpl implements ProductService {
         product.setAverageRating(newAverage);
 
         productRepository.save(product);
+
+        log.info("Rating updated for product uuid={}: newAverage={}, totalReviews={}",
+                productUuid, String.format("%.2f", newAverage), currentCount + 1);
     }
 
 }

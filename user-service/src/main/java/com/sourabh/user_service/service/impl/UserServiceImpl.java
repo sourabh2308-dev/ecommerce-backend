@@ -3,15 +3,21 @@ package com.sourabh.user_service.service.impl;
 import com.sourabh.user_service.common.PageResponse;
 import com.sourabh.user_service.dto.request.RegisterRequest;
 import com.sourabh.user_service.dto.request.VerifyOTPRequest;
+import com.sourabh.user_service.dto.response.InternalUserDto;
 import com.sourabh.user_service.dto.response.UserResponse;
 import com.sourabh.user_service.entity.*;
 import com.sourabh.user_service.exception.OTPException;
+import com.sourabh.user_service.exception.UserStateException;
 import com.sourabh.user_service.exception.UserAlreadyExistsException;
 import com.sourabh.user_service.exception.UserNotFoundException;
 import com.sourabh.user_service.repository.OTPVerificationRepository;
 import com.sourabh.user_service.repository.UserRepository;
 import com.sourabh.user_service.service.UserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -23,8 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Random;
-
-import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
@@ -58,6 +62,8 @@ public class UserServiceImpl implements UserService {
 
         generateAndSendOTP(user, OTPType.EMAIL);
 
+        log.info("New user registered: email={}, role={}", user.getEmail(), user.getRole());
+
         return mapToResponse(user);
     }
 
@@ -84,10 +90,15 @@ public class UserServiceImpl implements UserService {
             throw new OTPException("OTP expired");
         }
 
+        // Block brute-force after 5 failed attempts
+        if (otp.getAttemptCount() >= 5) {
+            throw new OTPException("OTP locked - too many failed attempts. Please request a new OTP.");
+        }
+
         if (!otp.getOtpCode().equals(request.getOtpCode())) {
             otp.setAttemptCount(otp.getAttemptCount() + 1);
             otpRepository.save(otp);
-            throw new OTPException("Invalid OTP");
+            throw new OTPException("Invalid OTP. " + (5 - otp.getAttemptCount()) + " attempt(s) remaining.");
         }
 
         otp.setVerified(true);
@@ -124,7 +135,7 @@ public class UserServiceImpl implements UserService {
         otpRepository.save(otp);
 
         // Simulate sending OTP
-        System.out.println("OTP for user " + user.getEmail() + " is: " + otpCode);
+        log.info("[OTP] Generated for email={}: {}", user.getEmail(), otpCode);
     }
 
     private UserResponse mapToResponse(User user) {
@@ -144,6 +155,10 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     public String approveSeller(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -154,11 +169,11 @@ public class UserServiceImpl implements UserService {
         }
 
         if (user.getRole() != Role.SELLER) {
-            throw new RuntimeException("User is not a seller");
+            throw new UserStateException("User is not a seller");
         }
 
         if (user.getStatus() != UserStatus.PENDING_APPROVAL) {
-            throw new RuntimeException("Seller is not pending approval");
+            throw new UserStateException("Seller is not pending approval");
         }
 
 
@@ -168,29 +183,39 @@ public class UserServiceImpl implements UserService {
 
         userRepository.save(user);
 
+        log.info("Seller approved: uuid={}", userUuid);
         return "Seller approved successfully";
     }
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     public String rejectSeller(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         if (user.getRole() != Role.SELLER) {
-            throw new RuntimeException("User is not a seller");
+            throw new UserStateException("User is not a seller");
         }
 
         user.setStatus(UserStatus.BLOCKED);
         user.setApproved(false);
         userRepository.save(user);
 
+        log.info("Seller rejected: uuid={}", userUuid);
         return "Seller rejected successfully";
     }
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     public String blockUser(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -200,6 +225,7 @@ public class UserServiceImpl implements UserService {
 
         userRepository.save(user);
 
+        log.info("User blocked: uuid={}", userUuid);
         return "User blocked successfully";
     }
 
@@ -228,6 +254,18 @@ public class UserServiceImpl implements UserService {
                             UserStatus.valueOf(status.toUpperCase()),
                             pageable
                     );
+        } else if (role != null) {
+            userPage = userRepository
+                    .findByRoleAndIsDeletedFalse(
+                            Role.valueOf(role.toUpperCase()),
+                            pageable
+                    );
+        } else if (status != null) {
+            userPage = userRepository
+                    .findByStatusAndIsDeletedFalse(
+                            UserStatus.valueOf(status.toUpperCase()),
+                            pageable
+                    );
         } else {
             userPage = userRepository
                     .findByIsDeletedFalse(pageable);
@@ -250,6 +288,10 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     public String softDeleteUser(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -260,11 +302,16 @@ public class UserServiceImpl implements UserService {
 
         userRepository.save(user);
 
+        log.info("User soft-deleted: uuid={}", userUuid);
         return "User soft deleted successfully";
     }
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
     public String restoreUser(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -275,6 +322,7 @@ public class UserServiceImpl implements UserService {
 
         userRepository.save(user);
 
+        log.info("User restored: uuid={}", userUuid);
         return "User restored successfully";
     }
 
@@ -329,9 +377,38 @@ public class UserServiceImpl implements UserService {
         return "OTP resent successfully";
     }
 
+    // ─────────────────────────────────────────────
+    // INTERNAL — cached for auth-service lookups
+    // ─────────────────────────────────────────────
 
+    @Override
+    @Cacheable(value = "usersByEmail", key = "#email")
+    public InternalUserDto getUserByEmailInternal(String email) {
+        log.debug("Cache miss for usersByEmail email={} — fetching from DB", email);
+        return userRepository.findByEmail(email)
+                .map(this::toInternalDto)
+                .orElse(null);
+    }
 
+    @Override
+    @Cacheable(value = "usersByUuid", key = "#uuid")
+    public InternalUserDto getUserByUuidInternal(String uuid) {
+        log.debug("Cache miss for usersByUuid uuid={} — fetching from DB", uuid);
+        return userRepository.findByUuid(uuid)
+                .map(this::toInternalDto)
+                .orElse(null);
+    }
 
-
+    private InternalUserDto toInternalDto(User user) {
+        return InternalUserDto.builder()
+                .uuid(user.getUuid())
+                .email(user.getEmail())
+                .password(user.getPassword())
+                .role(user.getRole().name())
+                .status(user.getStatus().name())
+                .emailVerified(user.isEmailVerified())
+                .build();
+    }
 
 }
+

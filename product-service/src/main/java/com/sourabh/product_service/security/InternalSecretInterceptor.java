@@ -2,15 +2,21 @@ package com.sourabh.product_service.security;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-@Component
+/**
+ * No longer active — superseded by InternalSecretFilter (servlet filter).
+ * Kept for reference only; not registered in WebConfig, not a Spring bean.
+ */
 public class InternalSecretInterceptor implements HandlerInterceptor {
 
-    @Value("${internal.secret}")
-    private String expectedSecret;
+    private final String expectedSecret;
+
+    public InternalSecretInterceptor(String expectedSecret) {
+        this.expectedSecret = expectedSecret;
+    }
+
+
 
     @Override
     public boolean preHandle(HttpServletRequest request,

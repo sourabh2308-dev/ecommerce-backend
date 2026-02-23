@@ -30,6 +30,11 @@ public class GlobalExceptionHandler {
         return buildError("OTP_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(UserStateException.class)
+    public ResponseEntity<ErrorResponse> handleUserState(UserStateException ex) {
+        return buildError("USER_STATE_ERROR", ex.getMessage(), HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException ex) {
 

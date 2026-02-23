@@ -6,8 +6,6 @@ import com.sourabh.user_service.entity.UserStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -24,6 +22,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findByRoleAndStatus(Role role, UserStatus status, Pageable pageable);
 
     Page<User> findByIsDeletedFalse(Pageable pageable);
+
+    Page<User> findByRoleAndIsDeletedFalse(Role role, Pageable pageable);
+
+    Page<User> findByStatusAndIsDeletedFalse(UserStatus status, Pageable pageable);
 
     Page<User> findByRoleAndStatusAndIsDeletedFalse(
             Role role,

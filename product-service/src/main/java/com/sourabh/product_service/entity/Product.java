@@ -39,12 +39,15 @@ public class Product extends BaseAuditEntity {
     @Enumerated(EnumType.STRING)
     private ProductStatus status;
 
+    @Builder.Default
     private Boolean isDeleted = false;
 
     @Column(nullable = false)
+    @Builder.Default
     private Double averageRating = 0.0;
 
     @Column(nullable = false)
+    @Builder.Default
     private Integer totalReviews = 0;
 
 }

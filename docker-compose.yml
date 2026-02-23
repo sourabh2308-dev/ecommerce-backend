@@ -1,5 +1,15 @@
 version: '3.8'
 
+# Shared environment — single source of truth for secrets.
+# Override with a .env file or Docker secrets in production.
+x-common-env: &common-env
+  DB_USERNAME: postgres
+  DB_PASSWORD: postgres
+  JWT_SECRET: mysupersecuresecretkeythatislongenough123
+  INTERNAL_SECRET: veryStrongInternalSecret123
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+
 services:
 
   postgres:
@@ -12,71 +22,169 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - "29092:29092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  zipkin:
+    image: openzipkin/zipkin:3
+    ports:
+      - "9411:9411"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9411/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   auth-service:
-    build: ./auth-service
-    ports:
-      - "8081:8080"
+    build:
+      context: .
+      dockerfile: ./auth-service/dockerfile
+    environment:
+      <<: *common-env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
 
   user-service:
-    build: ./user-service
-    ports:
-      - "8082:8080"
+    build:
+      context: .
+      dockerfile: ./user-service/dockerfile
+    environment:
+      <<: *common-env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
 
   product-service:
-    build: ./product-service
-    ports:
-      - "8083:8080"
+    build:
+      context: .
+      dockerfile: ./product-service/dockerfile
+    environment:
+      <<: *common-env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
 
   order-service:
-    build: ./order-service
-    ports:
-      - "8084:8080"
+    build:
+      context: .
+      dockerfile: ./order-service/dockerfile
+    environment:
+      <<: *common-env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
 
   review-service:
-    build: ./review-service
-    ports:
-      - "8085:8080"
+    build:
+      context: .
+      dockerfile: ./review-service/dockerfile
+    environment:
+      <<: *common-env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
 
   payment-service:
-    build: ./payment-service
-    ports:
-      - "8086:8080"
+    build:
+      context: .
+      dockerfile: ./payment-service/dockerfile
+    environment:
+      <<: *common-env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
 
   api-gateway:
-    build: ./api-gateway
+    build:
+      context: .
+      dockerfile: ./api-gateway/dockerfile
     ports:
       - "8080:8080"
+    environment:
+      <<: *common-env
     depends_on:
-      - auth-service
-      - user-service
-      - product-service
-      - order-service
-      - review-service
-      - payment-service
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      review-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+
+  frontend:
+    build: ../ecommerce-frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - api-gateway
 
 
 volumes:

@@ -1,21 +1,16 @@
 package com.sourabh.product_service.config;
 
-import com.sourabh.product_service.security.InternalSecretInterceptor;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+/**
+ * MVC interceptor registration for product-service.
+ *
+ * InternalSecretInterceptor is intentionally removed — its function is
+ * fully covered by the InternalSecretFilter servlet filter which applies
+ * to all request paths before reaching Spring MVC.
+ */
 @Configuration
-@RequiredArgsConstructor
 public class WebConfig implements WebMvcConfigurer {
-
-    private final InternalSecretInterceptor internalSecretInterceptor;
-
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-
-        registry.addInterceptor(internalSecretInterceptor)
-                .addPathPatterns("/api/products/**");
-    }
+    // No interceptors needed — InternalSecretFilter handles gateway validation
 }

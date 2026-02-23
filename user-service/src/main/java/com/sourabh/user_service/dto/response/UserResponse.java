@@ -4,9 +4,11 @@ import com.sourabh.user_service.entity.Role;
 import com.sourabh.user_service.entity.UserStatus;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.extern.jackson.Jacksonized;
 
 @Getter
 @Builder
+@Jacksonized
 public class UserResponse {
 
     private String uuid;

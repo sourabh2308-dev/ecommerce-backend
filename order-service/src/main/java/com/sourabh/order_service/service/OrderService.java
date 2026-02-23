@@ -30,4 +30,6 @@ public interface OrderService {
 
     void updatePaymentStatus(String uuid, String status);
 
+    OrderResponse getOrderByUuid(String uuid);
+
 }

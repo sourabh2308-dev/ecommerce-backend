@@ -7,12 +7,14 @@ import com.sourabh.order_service.service.OrderService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/order")
 @RequiredArgsConstructor
+@Slf4j
 public class OrderController {
 
     private final OrderService orderService;
@@ -98,5 +100,14 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    // =========================
+    // GET SINGLE ORDER
+    // =========================
+    @GetMapping("/{uuid}")
+    public ResponseEntity<OrderResponse> getOrder(
+            @PathVariable String uuid) {
+
+        return ResponseEntity.ok(orderService.getOrderByUuid(uuid));
+    }
 
 }

@@ -1,17 +1,19 @@
 package com.sourabh.review_service.controller;
 
+import com.sourabh.review_service.entity.Review;
 import com.sourabh.review_service.service.ReviewService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/review")
 @RequiredArgsConstructor
+@Slf4j
 public class ReviewController {
 
     private final ReviewService reviewService;
@@ -25,19 +27,17 @@ public class ReviewController {
             HttpServletRequest request) {
 
         String role = request.getHeader("X-User-Role");
-        String buyerUuid =
-                request.getHeader("X-User-UUID");
+        String buyerUuid = request.getHeader("X-User-UUID");
 
         return ResponseEntity.ok(
-                reviewService.createReview(
-                        orderUuid,
-                        productUuid,
-                        rating,
-                        comment,
-                        role,
-                        buyerUuid
-                )
+                reviewService.createReview(orderUuid, productUuid, rating, comment, role, buyerUuid)
         );
+    }
+
+    @GetMapping("/product/{productUuid}")
+    public ResponseEntity<List<Review>> getReviewsByProduct(
+            @PathVariable String productUuid) {
+        return ResponseEntity.ok(reviewService.getReviewsByProduct(productUuid));
     }
 }
 

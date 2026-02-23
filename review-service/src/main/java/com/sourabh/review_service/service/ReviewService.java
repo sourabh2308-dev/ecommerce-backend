@@ -1,5 +1,9 @@
 package com.sourabh.review_service.service;
 
+import com.sourabh.review_service.entity.Review;
+
+import java.util.List;
+
 public interface ReviewService {
 
     String createReview(
@@ -9,5 +13,7 @@ public interface ReviewService {
             String comment,
             String role,
             String buyerUuid);
+
+    List<Review> getReviewsByProduct(String productUuid);
 }
 
