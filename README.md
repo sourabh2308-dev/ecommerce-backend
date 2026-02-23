@@ -1,562 +1,563 @@
-# 🛒 ShopHub — E-Commerce Microservices Backend
+# 🛒 E-Commerce Backend (Microservices)
 
-A production-ready, cloud-native e-commerce backend built with **Spring Boot 3.2**, **Spring Cloud 2023**, and **Java 17**. The system is comprised of 6 business microservices behind an API Gateway, with full observability, distributed tracing, and an event-driven architecture powered by Apache Kafka.
+A production-style e-commerce backend built with **Spring Boot 3.2.x**, **Spring Cloud 2023.x**, **Java 17**, and **Docker Compose**.
 
-A companion **React + TypeScript frontend** lives at [ecommerce-frontend](https://github.com/sourabh2308-dev/ecommerce-frontend).
+This repository contains:
+- API Gateway (single public entry point)
+- Auth, User, Product, Order, Payment, Review microservices
+- Eureka (service discovery) + Config Server (shared config)
+- PostgreSQL, Redis, Kafka, Zipkin, Prometheus, Grafana
 
----
+## 📘 Complete Documentation Bundle
 
-## 📑 Table of Contents
-
-- [Architecture Overview](#-architecture-overview)
-- [Services & Ports](#-services--ports)
-- [Tech Stack](#-tech-stack)
-- [Project Structure](#-project-structure)
-- [Prerequisites](#-prerequisites)
-- [Getting Started](#-getting-started)
-- [Environment Variables](#-environment-variables)
-- [API Reference](#-api-reference)
-- [Security Model](#-security-model)
-- [Event-Driven Flows](#-event-driven-flows)
-- [Observability](#-observability)
-- [Database](#-database)
-- [Configuration Server](#-configuration-server)
-- [Frontend](#-frontend)
-- [Running Tests](#-running-tests)
+- Deep architecture + code flow explanation: [docs/FLOW_AND_CODE_EXPLANATION.md](docs/FLOW_AND_CODE_EXPLANATION.md)
+- Full line-numbered source/config reference (all included files): [docs/COMPLETE_CODE_REFERENCE.md](docs/COMPLETE_CODE_REFERENCE.md)
+- Regeneration script for full reference: `scripts/generate_full_reference.sh`
 
 ---
 
-## 🏗 Architecture Overview
+## 📚 Table of Contents
 
-```
-Browser / Mobile
-      │
-      ▼
-┌─────────────┐                     ┌───────────────────────┐
-│  Frontend   │──── /api/* ────────►│     API Gateway       │ :8080
-│  (React)    │                     │  (Spring Cloud GW)    │
-│  :3001      │◄── response ────────│  JWT validation       │
-└─────────────┘                     │  Header injection     │
-                                    └──────────┬────────────┘
-                                               │ X-User-UUID
-                                               │ X-User-Role
-                                               │ X-Internal-Secret
-                          ┌────────────────────┼────────────────────┐
-                          ▼                    ▼                    ▼
-                    auth-service         user-service        product-service
-                          │                    │                    │
-                          └────────────────────┼────────────────────┘
-                                               │
-                          ┌────────────────────┼────────────────────┐
-                          ▼                    ▼                    ▼
-                    order-service       payment-service      review-service
-
-Infrastructure:
-  PostgreSQL 15 · Redis 7 · Apache Kafka 3.7 (KRaft) · Zipkin
-  Prometheus · Grafana · Eureka Server · Config Server
-```
-
-The **API Gateway** is the single entry point for all client traffic.  
-It validates JWTs, injects identity headers, and routes to downstream services.  
-All services register with **Eureka** for service discovery.  
-The **Config Server** provides shared configuration (tracing, management, logging).
+- [1) System Overview](#1-system-overview)
+- [2) Service Map and Ports](#2-service-map-and-ports)
+- [3) Repository Structure](#3-repository-structure)
+- [4) Architecture and Request Flow](#4-architecture-and-request-flow)
+- [5) Security Model (JWT + Internal Secret)](#5-security-model-jwt--internal-secret)
+- [6) Configuration and Environment Variables](#6-configuration-and-environment-variables)
+- [7) API Endpoints (All Services)](#7-api-endpoints-all-services)
+- [8) Event-Driven Flows (Kafka)](#8-event-driven-flows-kafka)
+- [9) Database Model and Initialization](#9-database-model-and-initialization)
+- [10) Local Development (Without Docker for app services)](#10-local-development-without-docker-for-app-services)
+- [11) Full Docker Compose Workflow](#11-full-docker-compose-workflow)
+- [12) Observability and Monitoring](#12-observability-and-monitoring)
+- [13) Troubleshooting (Common Failures)](#13-troubleshooting-common-failures)
+- [14) Useful Commands](#14-useful-commands)
 
 ---
 
-## 📦 Services & Ports
+## 1) System Overview
 
-| Service | External Port | Internal Port | Database | Description |
-|---|---|---|---|---|
-| `api-gateway` | **8080** | 8080 | — | Single entry point, JWT validation, routing |
-| `eureka-server` | **8761** | 8761 | — | Service registry (Netflix Eureka) |
-| `config-server` | **8888** | 8888 | — | Centralised Spring Cloud Config |
-| `auth-service` | — | 8080 | `auth_db` | Register, login, OTP, refresh, logout |
-| `user-service` | — | 8080 | `user_db` | Profile management, admin user control |
-| `product-service` | — | 8080 | `product_db` | Catalogue, approval workflow, stock, ratings |
-| `order-service` | — | 8080 | `order_db` | Order lifecycle, stock via Feign |
-| `payment-service` | — | 8080 | `payment_db` | Payment processing and queries |
-| `review-service` | — | 8080 | `review_db` | Review CRUD, pushes ratings to product |
-| `frontend` | **3001** | 80 | — | React app served by Nginx |
-| `postgres` | 5432 | 5432 | — | PostgreSQL 15 (6 databases) |
-| `redis` | 6379 | 6379 | — | Redis 7 (cache + refresh token store) |
-| `kafka` | 29092 (host) | 9092 | — | Apache Kafka 3.7 (KRaft, no Zookeeper) |
-| `zipkin` | **9411** | 9411 | — | Distributed trace UI |
-| `prometheus` | **9090** | 9090 | — | Metrics scraper |
-| `grafana` | **3000** | 3000 | — | Metrics dashboards |
+This is a **multi-module Maven monorepo** where each bounded context is an independent Spring Boot service.
 
----
+High-level behavior:
+1. Client calls `api-gateway`.
+2. Gateway validates JWT and injects trusted identity headers.
+3. Gateway forwards to downstream services.
+4. Services enforce authorization with Spring Security + method-level rules.
+5. Services communicate both synchronously (HTTP/Feign) and asynchronously (Kafka).
 
-## ⚙️ Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Language | Java 17 |
-| Framework | Spring Boot 3.2.5 |
-| Microservices | Spring Cloud 2023.0.1 |
-| API Gateway | Spring Cloud Gateway |
-| Service Discovery | Netflix Eureka |
-| Config Management | Spring Cloud Config Server |
-| Security | Spring Security + JWT (JJWT), method-level `@PreAuthorize` |
-| ORM | Spring Data JPA + Hibernate |
-| Database | PostgreSQL 15 |
-| Caching | Redis 7 (Spring Cache abstraction) |
-| Messaging | Apache Kafka 3.7 (KRaft — no Zookeeper) |
-| Migrations | Flyway |
-| Inter-service HTTP | OpenFeign + Resilience4j circuit breakers |
-| Distributed Tracing | Micrometer Tracing + Zipkin |
-| Metrics | Micrometer + Prometheus + Grafana |
-| API Docs | SpringDoc OpenAPI 3 (Swagger UI) |
-| Build | Maven (multi-module, 10 modules) |
-| Containers | Docker + Docker Compose v2 |
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS 4 |
+Core stack:
+- Java 17
+- Spring Boot 3.2.5
+- Spring Cloud 2023.0.1
+- PostgreSQL 15
+- Redis 7
+- Apache Kafka 3.7.0 (KRaft)
+- Zipkin + Prometheus + Grafana
 
 ---
 
-## 📁 Project Structure
+## 2) Service Map and Ports
 
-```
+### Publicly exposed on host
+
+| Service | Host Port | Purpose |
+|---|---:|---|
+| api-gateway | 8080 | Main API entry point |
+| eureka-server | 8761 | Service registry UI |
+| config-server | 8888 | Centralized config |
+| postgres | 5432 | Database server |
+| redis | 6379 | Caching / token store |
+| kafka | 29092 | Kafka host listener |
+| zipkin | 9411 | Tracing UI |
+| prometheus | 9090 | Metrics scraping UI |
+| grafana | 3000 | Dashboards |
+| frontend | 3001 | Frontend container |
+
+### Internal app services (container network)
+
+| Service | Internal Port |
+|---|---:|
+| auth-service | 8080 |
+| user-service | 8080 |
+| product-service | 8080 |
+| order-service | 8080 |
+| payment-service | 8080 |
+| review-service | 8080 |
+
+---
+
+## 3) Repository Structure
+
+```text
 ecommerce-backend/
-├── pom.xml                        # Parent POM (10 modules)
-├── docker-compose.yml             # Full-stack orchestration (16 services)
-├── init.sql                       # PostgreSQL DB initialisation
-├── prometheus.yml                 # Prometheus scrape targets
-├── grafana/provisioning/          # Grafana auto-provisioned datasource
+├── pom.xml                         # Parent POM (packaging=pom)
+├── docker-compose.yml              # Full stack orchestration
+├── init.sql                        # Creates service databases
+├── prometheus.yml                  # Prometheus scrape config
+├── README.md
 │
-├── config-server/                 # Spring Cloud Config Server
-│   └── src/main/resources/config/
-│       └── application.properties # Shared config for all services
-│
-├── eureka-server/                 # Netflix Eureka Server
-├── api-gateway/                   # Spring Cloud Gateway + JWT filter
-│
+├── api-gateway/
 ├── auth-service/
 ├── user-service/
-├── product-service/               # Includes V2 migration: add image_url
+├── product-service/
 ├── order-service/
 ├── payment-service/
-└── review-service/
+├── review-service/
+├── eureka-server/
+└── config-server/
 ```
 
-Each service follows the same internal structure:
+Parent `pom.xml` modules:
+- `user-service`
+- `auth-service`
+- `api-gateway`
+- `product-service`
+- `order-service`
+- `review-service`
+- `payment-service`
+- `eureka-server`
+- `config-server`
 
+---
+
+## 4) Architecture and Request Flow
+
+```text
+Client / Frontend
+      │
+      ▼
+API Gateway (:8080)
+  - JWT validation
+  - identity header injection
+  - internal secret header injection
+      │
+      ├── auth-service
+      ├── user-service
+      ├── product-service
+      ├── order-service
+      ├── payment-service
+      └── review-service
+
+Shared infra:
+- Eureka (discovery)
+- Config Server (shared config)
+- PostgreSQL (per-service databases)
+- Redis
+- Kafka
+- Zipkin / Prometheus / Grafana
 ```
-{service}/src/main/java/com/sourabh/{service}/
-├── config/          # Security, CORS, Redis, OpenAPI, Feign config
-├── controller/      # REST controllers
-├── dto/             # Request / Response DTOs
-├── entity/          # JPA entities
-├── exception/       # Custom exceptions + GlobalExceptionHandler
-├── filter/          # CorrelationId, InternalSecret request filters
-├── kafka/           # Producers, Consumers, Event model classes
-├── repository/      # Spring Data JPA repositories
-└── service/         # Service interfaces + implementations
+
+Gateway route fallback (from `api-gateway/src/main/resources/application.properties`):
+
+```properties
+spring.cloud.gateway.routes[0].id=auth-service
+spring.cloud.gateway.routes[0].uri=http://auth-service:8080
+spring.cloud.gateway.routes[0].predicates[0]=Path=/api/auth/**
+
+spring.cloud.gateway.routes[1].id=user-service
+spring.cloud.gateway.routes[1].uri=http://user-service:8080
+spring.cloud.gateway.routes[1].predicates[0]=Path=/api/user/**
+
+spring.cloud.gateway.routes[2].id=product-service
+spring.cloud.gateway.routes[2].uri=http://product-service:8080
+spring.cloud.gateway.routes[2].predicates[0]=Path=/api/product/**
 ```
 
 ---
 
-## ✅ Prerequisites
+## 5) Security Model (JWT + Internal Secret)
 
-- **Java 17+**
-- **Maven 3.9+** (or the bundled `./mvnw` wrapper)
-- **Docker** and **Docker Compose** v2
+### 5.1 Gateway does authentication once
+
+`api-gateway` validates JWT and only forwards trusted identity context.
+
+From `SecurityConfig` (public paths + authenticated default):
+
+```java
+private static final String[] PUBLIC_PATHS = {
+    "/api/auth/login",
+    "/api/auth/refresh",
+    "/api/user/register",
+    "/api/user/verify-otp",
+    "/api/user/resend-otp",
+    "/swagger-ui.html",
+    "/swagger-ui/**",
+    "/v3/api-docs/**"
+};
+
+.authorizeExchange(exchange -> exchange
+    .pathMatchers(PUBLIC_PATHS).permitAll()
+    .anyExchange().authenticated())
+```
+
+### 5.2 Header injection at gateway
+
+From `InternalSecretFilterConfig`:
+- strips spoofable `X-User-*` headers from incoming client requests
+- extracts claims from valid Bearer token
+- injects:
+  - `X-User-UUID`
+  - `X-User-Role`
+  - `X-User-Email`
+- injects `X-Internal-Secret` for inter-service trust
+
+```java
+mutated.headers(h -> {
+    h.remove("X-User-UUID");
+    h.remove("X-User-Role");
+    h.remove("X-User-Email");
+});
+...
+mutated.header("X-Internal-Secret", internalSecret);
+```
+
+### 5.3 Downstream authorization
+
+Services use `@PreAuthorize` with roles:
+- `BUYER`
+- `SELLER`
+- `ADMIN`
+
+Example from `user-service`:
+
+```java
+@PreAuthorize("hasRole('ADMIN')")
+@PutMapping("/admin/block/{uuid}")
+public ResponseEntity<ApiResponse<String>> blockUser(@PathVariable String uuid) {
+    return ResponseEntity.ok(ApiResponse.success(userService.blockUser(uuid), null));
+}
+```
 
 ---
 
-## 🚀 Getting Started
+## 6) Configuration and Environment Variables
 
-### 1 — Clone
+Shared container env (`docker-compose.yml`):
+
+```yaml
+x-common-env: &common-env
+  DB_USERNAME: postgres
+  DB_PASSWORD: postgres
+  JWT_SECRET: mysupersecuresecretkeythatislongenough123
+  INTERNAL_SECRET: veryStrongInternalSecret123
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+  EUREKA_URL: http://eureka-server:8761/eureka
+  CONFIG_SERVER_URL: http://config-server:8888
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+```
+
+Config Server shared properties (`config-server/src/main/resources/config/application.properties`) include:
+- Eureka registration defaults
+- Zipkin tracing endpoint and sampling
+- Actuator exposure (`health,info,metrics,prometheus,refresh`)
+- Prometheus export enabled
+- Shared logging pattern with `traceId` and `spanId`
+
+> ⚠️ For real deployments, replace default secrets (`JWT_SECRET`, `INTERNAL_SECRET`) and externalize them.
+
+---
+
+## 7) API Endpoints (All Services)
+
+All routes below are called through gateway base URL:
+
+```text
+http://localhost:8080
+```
+
+### 7.1 Auth Service (`/api/auth`)
+
+From `AuthController`:
+
+| Method | Path | Access | Description |
+|---|---|---|---|
+| POST | `/api/auth/login` | Public | Login and receive tokens |
+| POST | `/api/auth/refresh?refreshToken=...` | Public | Refresh token pair |
+| POST | `/api/auth/logout?refreshToken=...` | Authenticated | Revoke/expire refresh token |
+
+### 7.2 User Service (`/api/user`)
+
+From `UserController`:
+
+Public:
+- `POST /api/user/register`
+- `POST /api/user/verify-otp`
+- `POST /api/user/resend-otp?email=...`
+
+Authenticated user:
+- `GET /api/user/me`
+- `PUT /api/user/me`
+- `PUT /api/user/me/change-password`
+
+Admin:
+- `PUT /api/user/admin/approve/{uuid}`
+- `PUT /api/user/admin/reject/{uuid}`
+- `PUT /api/user/admin/block/{uuid}`
+- `PUT /api/user/admin/unblock/{uuid}`
+- `GET /api/user` (paginated list)
+- `DELETE /api/user/{uuid}`
+- `PUT /api/user/restore/{uuid}`
+- `GET /api/user/search?keyword=...`
+
+Internal-only:
+- `GET /api/user/internal/email/{email}`
+- `GET /api/user/internal/uuid/{uuid}`
+
+### 7.3 Product Service (`/api/product`)
+
+From `ProductController`:
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `/api/product` | SELLER |
+| PUT | `/api/product/{uuid}` | SELLER, ADMIN |
+| PUT | `/api/product/admin/approve/{uuid}` | ADMIN |
+| PUT | `/api/product/admin/block/{uuid}` | ADMIN |
+| PUT | `/api/product/admin/unblock/{uuid}` | ADMIN |
+| DELETE | `/api/product/{uuid}` | SELLER, ADMIN |
+| GET | `/api/product` | Public / role-aware listing |
+| GET | `/api/product/{uuid}` | Public / role-aware |
+| PUT | `/api/product/internal/reduce-stock/{uuid}?quantity=` | Internal |
+| PUT | `/api/product/internal/restore-stock/{uuid}?quantity=` | Internal |
+| PUT | `/api/product/internal/update-rating/{uuid}?rating=` | Internal |
+
+### 7.4 Order Service (`/api/order`)
+
+From `OrderController`:
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `/api/order` | BUYER |
+| GET | `/api/order` | Role-aware list |
+| GET | `/api/order/seller` | SELLER |
+| PUT | `/api/order/{uuid}/status?status=` | BUYER, ADMIN |
+| PUT | `/api/order/internal/payment-update/{uuid}?status=` | Internal |
+| GET | `/api/order/{uuid}` | Role-aware single order |
+
+### 7.5 Payment Service (`/api/payment`)
+
+From `PaymentController`:
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `/api/payment` | BUYER |
+| GET | `/api/payment` | BUYER |
+| GET | `/api/payment/{uuid}` | BUYER, ADMIN |
+| GET | `/api/payment/order/{orderUuid}` | BUYER, ADMIN |
+
+### 7.6 Review Service (`/api/review`)
+
+From `ReviewController`:
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `/api/review` | BUYER |
+| GET | `/api/review/product/{productUuid}` | Public |
+| GET | `/api/review/{uuid}` | Public |
+| PUT | `/api/review/{uuid}` | BUYER |
+| DELETE | `/api/review/{uuid}` | BUYER, ADMIN |
+| GET | `/api/review/me` | BUYER |
+
+### 7.7 Swagger / OpenAPI
+
+Gateway aggregates service docs:
+- `http://localhost:8080/swagger-ui.html`
+
+Configured swagger sources in gateway properties:
+- `/api/auth/v3/api-docs`
+- `/api/user/v3/api-docs`
+- `/api/product/v3/api-docs`
+- `/api/order/v3/api-docs`
+- `/api/review/v3/api-docs`
+- `/api/payment/v3/api-docs`
+
+---
+
+## 8) Event-Driven Flows (Kafka)
+
+Implemented event flows:
+- Payment processing updates order state (payment → order)
+- Review events trigger product rating updates (review → product)
+
+Infra notes:
+- Kafka uses `apache/kafka:3.7.0` with KRaft mode in compose.
+- Broker host port exposed on `29092` for local clients.
+
+---
+
+## 9) Database Model and Initialization
+
+`init.sql` creates databases:
+- `user_db`
+- `auth_db`
+- `order_db`
+- `review_db`
+- `product_db`
+- `payment_db`
+
+Current `init.sql` includes `CREATE DATABASE payment_db;` twice. On first fresh initialization this can cause a startup error if both statements execute in one run. Recommended fix is to keep only one line (or use `CREATE DATABASE ...` guarded logic).
+
+Service persistence model:
+- one database per microservice (database-per-service pattern)
+- each service owns its schema and migrations
+
+---
+
+## 10) Local Development (Without Docker for app services)
+
+Run infra dependencies only, then start services from IDE/terminal.
 
 ```bash
-git clone https://github.com/sourabh2308-dev/ecommerce-backend.git
-cd ecommerce-backend
+docker compose up -d postgres redis kafka zipkin eureka-server config-server
 ```
 
-### 2 — Build all JARs
+Build all modules:
 
 ```bash
 ./mvnw clean package -DskipTests
 ```
 
-### 3 — Start the full stack
+Run one service example:
 
 ```bash
-docker compose up --build
-```
-
-Docker Compose enforces startup order via health-check `depends_on` conditions:
-
-```
-PostgreSQL + Redis + Kafka + Zipkin
-        ↓
-  Eureka Server
-        ↓
-  Config Server
-        ↓
-  auth · user · product · order · payment · review services
-        ↓
-  API Gateway  →  Frontend
-        ↓
-  Prometheus  →  Grafana
-```
-
-### 4 — Verify
-
-| URL | Description |
-|---|---|
-| `http://localhost:3001` | React frontend |
-| `http://localhost:8080` | API Gateway (all API requests go here) |
-| `http://localhost:8761` | Eureka service registry dashboard |
-| `http://localhost:8888/actuator/health` | Config server health |
-| `http://localhost:9411` | Zipkin distributed traces |
-| `http://localhost:9090` | Prometheus metrics explorer |
-| `http://localhost:3000` | Grafana dashboards (login: `admin` / `admin`) |
-
-### 5 — Local Development (single service)
-
-Start only the infrastructure, then run any service from your IDE or terminal:
-
-```bash
-# Infrastructure only
-docker compose up postgres redis kafka zipkin eureka-server config-server -d
-
-# Run a service
 cd product-service
 ./mvnw spring-boot:run
 ```
 
 ---
 
-## 🔑 Environment Variables
+## 11) Full Docker Compose Workflow
 
-All secrets live in `docker-compose.yml` under the `x-common-env` YAML anchor and are injected into every service container. Override them via a `.env` file at the repo root.
-
-| Variable | Default | Description |
-|---|---|---|
-| `DB_USERNAME` | `postgres` | PostgreSQL username |
-| `DB_PASSWORD` | `postgres` | PostgreSQL password |
-| `JWT_SECRET` | `mysupersecurejwtsecretkey...` | HMAC-SHA256 signing key (≥ 32 chars) |
-| `INTERNAL_SECRET` | `veryStrongInternalSecret...` | Shared header for service-to-service calls |
-| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:9092` | Kafka broker address |
-| `ZIPKIN_URL` | `http://zipkin:9411/api/v2/spans` | Zipkin span reporting endpoint |
-| `EUREKA_URL` | `http://eureka-server:8761/eureka` | Eureka registration URL |
-| `CONFIG_SERVER_URL` | `http://config-server:8888` | Spring Cloud Config URL |
-| `REDIS_HOST` | `redis` | Redis hostname |
-| `REDIS_PORT` | `6379` | Redis port |
-
-> ⚠️ **Always change `JWT_SECRET` and `INTERNAL_SECRET` before any public deployment.**
-
----
-
-## 📡 API Reference
-
-All routes go through the API Gateway at `http://localhost:8080`.
-
-The gateway strips the `Authorization` header and injects:
-- `X-User-UUID` — authenticated user's UUID
-- `X-User-Role` — `BUYER`, `SELLER`, or `ADMIN`
-- `X-Internal-Secret` — consumed by internal-only endpoints
-
----
-
-### Auth  `/api/auth`
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/api/auth/register` | Public | Register a new user (BUYER or SELLER role) |
-| `POST` | `/api/auth/verify-otp` | Public | Verify email OTP sent on registration |
-| `POST` | `/api/auth/resend-otp` | Public | Resend OTP to registered email |
-| `POST` | `/api/auth/login` | Public | Login → returns `accessToken` + `refreshToken` |
-| `POST` | `/api/auth/refresh` | Public | Rotate refresh token, get new access token |
-| `POST` | `/api/auth/logout` | Bearer | Revoke refresh token (stored in Redis) |
-
-**Token lifetimes:**  
-Access token — 15 minutes | Refresh token — 7 days (stored in Redis, rotated on use)
-
----
-
-### User  `/api/user`
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/api/user/me` | Bearer | Get own profile |
-| `PUT` | `/api/user/me` | Bearer | Update own profile |
-| `PUT` | `/api/user/me/change-password` | Bearer | Change password |
-| `GET` | `/api/user/{uuid}` | ADMIN | Get any user by UUID |
-| `GET` | `/api/user/all` | ADMIN | Paginated list of all users |
-| `PUT` | `/api/user/block/{uuid}` | ADMIN | Block a user account |
-| `PUT` | `/api/user/unblock/{uuid}` | ADMIN | Unblock a user account |
-| `DELETE` | `/api/user/{uuid}` | ADMIN | Soft-delete a user |
-
----
-
-### Product  `/api/product`
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/api/product` | Public | Paginated product list (BUYER sees ACTIVE only) |
-| `GET` | `/api/product/{uuid}` | Public | Get product detail |
-| `POST` | `/api/product` | SELLER | Create product (starts as `DRAFT`) |
-| `PUT` | `/api/product/{uuid}` | SELLER/ADMIN | Update product fields including `imageUrl` |
-| `DELETE` | `/api/product/{uuid}` | SELLER/ADMIN | Soft-delete product |
-| `PUT` | `/api/product/admin/approve/{uuid}` | ADMIN | Approve product (`DRAFT` → `ACTIVE`) |
-| `PUT` | `/api/product/admin/block/{uuid}` | ADMIN | Block a product |
-| `PUT` | `/api/product/admin/unblock/{uuid}` | ADMIN | Unblock product (`BLOCKED` → `DRAFT`) |
-
-**Product statuses:** `DRAFT` → `ACTIVE` ↔ `BLOCKED`, `OUT_OF_STOCK` (auto when stock = 0)
-
-**Query params for `GET /api/product`:** `page`, `size`, `sortBy`, `direction`, `keyword`
-
-**Internal endpoints** (require `X-Internal-Secret` header, called by other services):
-- `PUT /api/product/internal/reduce-stock/{uuid}`
-- `PUT /api/product/internal/restore-stock/{uuid}`
-- `PUT /api/product/internal/update-rating/{uuid}`
-
----
-
-### Order  `/api/order`
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/api/order` | BUYER | Place an order (reduces stock via Feign) |
-| `GET` | `/api/order/{uuid}` | Bearer | Get order (ownership enforced for BUYER) |
-| `GET` | `/api/order/my-orders` | BUYER | List own orders |
-| `GET` | `/api/order/seller/orders` | SELLER | List orders containing seller's products |
-| `PUT` | `/api/order/{uuid}/status` | SELLER/ADMIN | Advance order status |
-| `PUT` | `/api/order/{uuid}/cancel` | BUYER | Cancel order (restores stock) |
-
-**Order statuses:** `PENDING` → `PROCESSING` → `SHIPPED` → `DELIVERED` | `CANCELLED`
-
----
-
-### Payment  `/api/payment`
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/api/payment` | BUYER | Initiate payment for an order |
-| `GET` | `/api/payment` | BUYER/ADMIN | List payments (BUYER sees own only) |
-| `GET` | `/api/payment/{uuid}` | BUYER/ADMIN | Get payment by UUID |
-| `GET` | `/api/payment/order/{orderUuid}` | BUYER/ADMIN | Get payment by order UUID |
-
-**Payment statuses:** `PENDING`, `SUCCESS`, `FAILED`
-
----
-
-### Review  `/api/review`
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `POST` | `/api/review` | BUYER | Submit a review (linked to a completed order) |
-| `GET` | `/api/review/product/{productUuid}` | Public | List reviews for a product |
-| `GET` | `/api/review/{uuid}` | Public | Get single review |
-| `PUT` | `/api/review/{uuid}` | BUYER (owner) | Update own review |
-| `DELETE` | `/api/review/{uuid}` | BUYER (owner) | Delete own review |
-| `GET` | `/api/review/me` | BUYER | Get all own reviews |
-
-After any review create/update/delete, a Kafka event triggers the product-service to recalculate the product's average rating.
-
----
-
-## 🔒 Security Model
-
-### JWT Authentication Flow
-
-```
-1. Client          → POST /api/auth/login
-2. auth-service    → validates credentials, issues accessToken (15 min) + refreshToken (7 d)
-3. Client attaches → Authorization: Bearer <accessToken>
-4. API Gateway     → validates JWT signature & expiry
-5. API Gateway     → injects X-User-UUID, X-User-Role, strips Authorization header
-6. Downstream      → reads headers, builds SecurityContext (no JWT dependency)
-7. On 401          → client calls POST /api/auth/refresh
-```
-
-### Role-Based Access Control
-
-Roles are encoded in the JWT and forwarded via `X-User-Role`. Each service applies `@PreAuthorize` at the method level:
-
-| Role | Capabilities |
-|---|---|
-| **BUYER** | Browse products, place orders, make payments, write reviews |
-| **SELLER** | Manage own products (CRUD), view own orders and payments |
-| **ADMIN** | Full system access: approve/block products, manage all users, view all orders/payments |
-
-### Inter-Service Security
-
-Internal Feign calls (e.g. order-service → product-service for stock) include an `X-Internal-Secret` header. Each service validates this via `InternalSecretFilter` before processing internal-only endpoints.
-
----
-
-## 📨 Event-Driven Flows
-
-### Kafka Topics
-
-| Topic | Producer | Consumer |
-|---|---|---|
-| `payment-events` | payment-service | order-service |
-| `review-submitted-events` | review-service | product-service |
-
-### Payment → Order Status Update
-
-```
-BUYER places order
-  └─► order-service publishes OrderCreatedEvent (Kafka)
-        └─► payment-service consumes → creates PENDING payment
-              └─► payment-service publishes PaymentProcessedEvent (Kafka)
-                    └─► order-service consumes → updates order to PROCESSING
-```
-
-### Stock Management (Synchronous via Feign)
-
-```
-Order confirmed  ──► order-service calls product-service → /internal/reduce-stock
-Order cancelled  ──► order-service calls product-service → /internal/restore-stock
-Stock drops to 0 ──► product-service auto-sets status = OUT_OF_STOCK
-Stock restored   ──► product-service auto-sets status = ACTIVE
-```
-
-### Review → Rating Update
-
-```
-Buyer submits/edits/deletes review
-  └─► review-service publishes ReviewSubmittedEvent (Kafka)
-        └─► product-service consumes → recalculates averageRating + totalReviews
-```
-
----
-
-## 📊 Observability
-
-### Distributed Tracing — Zipkin
-
-Every service propagates W3C `traceId` / `spanId` via Micrometer + Brave.  
-View full end-to-end request traces at `http://localhost:9411`.
-
-### Metrics — Prometheus + Grafana
-
-- Each service exposes `/actuator/prometheus`
-- Prometheus scrapes all services (configured in `prometheus.yml`)
-- Grafana at `http://localhost:3000` (login: `admin` / `admin`) has a pre-provisioned Prometheus datasource
-
-### Structured Logging
-
-All services use `logback-spring.xml` with a pattern that includes `traceId`, `spanId`, and service name for easy log correlation (compatible with ELK / Loki).
-
-### Correlation IDs
-
-`CorrelationIdFilter` on every service generates/propagates an `X-Correlation-ID` header through the full request chain.
-
----
-
-## 🗄 Database
-
-**One PostgreSQL database per service** (database-per-service pattern for isolation):
-
-| Service | Database |
-|---|---|
-| auth-service | `auth_db` |
-| user-service | `user_db` |
-| product-service | `product_db` |
-| order-service | `order_db` |
-| payment-service | `payment_db` |
-| review-service | `review_db` |
-
-All 6 databases are created by `init.sql` when the PostgreSQL container first starts.
-
-**Schema lifecycle:**  
-Managed by **Flyway** (`spring.flyway.enabled=true`, `spring.jpa.hibernate.ddl-auto=validate`).  
-Migration scripts live at `src/main/resources/db/migration/V{n}__{description}.sql`.
-
-Notable migrations:
-- `product-service/V2__add_image_url.sql` — `ALTER TABLE product ADD COLUMN image_url VARCHAR(1000)`
-
----
-
-## ⚙️ Configuration Server
-
-Shared configuration is in `config-server/src/main/resources/config/application.properties` and is served to all services at startup.
-
-**Shared properties include:**
-- Eureka client registration
-- Micrometer / Zipkin distributed tracing
-- Management endpoint exposure (health, prometheus, info)
-- Logging pattern with `traceId`, `spanId`, `serviceName`
-
-Each service's local `application.properties` contains only service-specific config:  
-datasource URL, Kafka topics, Redis cache TTLs, Feign client URLs, server port, etc.
-
-Services include `spring.config.import=optional:configserver:${CONFIG_SERVER_URL}` to pull shared properties at boot.
-
----
-
-## 🖥 Frontend
-
-The React frontend is maintained separately and runs on **port 3001** when started via Docker Compose.
-
-| Detail | Value |
-|---|---|
-| Technology | React 18 + TypeScript + Vite + Tailwind CSS 4 |
-| State management | Zustand (auth state, cart) |
-| Server state | TanStack React Query v5 |
-| HTTP client | Axios with JWT interceptor + automatic token refresh |
-| Forms | React Hook Form + Zod validation |
-| UI | Lucide React icons, react-hot-toast notifications |
-| Served by | Nginx (in Docker), proxies `/api/*` → `api-gateway:8080` |
-
-**Pages by role:**
-
-| Role | Pages |
-|---|---|
-| Guest | Products browse, Product detail, Login, Register |
-| BUYER | + Cart, Checkout, My Orders, Order Detail, Reviews |
-| SELLER | Seller Products (image URL, price, stock), Seller Orders |
-| ADMIN | Admin Users (block/unblock), Admin Products (approve/block), Admin Orders |
-
-Product images are stored as URLs (CDN / S3 link) set by the seller in the product form.
-
----
-
-## 🧪 Running Tests
-
-```bash
-# Run all tests across all modules
-./mvnw test
-
-# Run tests in a single service
-./mvnw -pl product-service test
-
-# Build without running tests
-./mvnw clean package -DskipTests
-```
-
-All **54 tests pass** across the 10 Maven modules. Integration tests use an H2 in-memory database; Kafka listener auto-startup is disabled during tests.
-
----
-
-## 🐳 Docker Images
-
-Each service has its own `dockerfile`:
-
-```dockerfile
-FROM eclipse-temurin:17-jre
-COPY target/*.jar app.jar
-ENTRYPOINT ["java", "-jar", "/app.jar"]
-```
-
-Build a single image manually:
-
-```bash
-./mvnw -pl product-service clean package -DskipTests
-docker build -f product-service/dockerfile -t shophub/product-service:latest .
-```
-
-Build and start the entire stack:
+### 11.1 Build + up
 
 ```bash
 docker compose up --build
 ```
 
+### 11.2 Check status
+
+```bash
+docker compose ps -a
+```
+
+### 11.3 Follow logs
+
+```bash
+docker compose logs -f api-gateway
+docker compose logs -f auth-service
+docker compose logs -f product-service
+```
+
+### 11.4 Stop all services
+
+```bash
+docker compose down
+```
+
+### 11.5 Stop + remove volumes
+
+```bash
+docker compose down -v
+```
+
 ---
 
-## 📜 License
+## 12) Observability and Monitoring
 
-This project is for educational and portfolio purposes.
+- Zipkin: `http://localhost:9411`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (default `admin/admin`)
+
+Health endpoints (examples):
+- `http://localhost:8761/actuator/health`
+- `http://localhost:8888/actuator/health`
+
+Actuator/Prometheus are enabled through shared config from Config Server.
+
+---
+
+## 13) Troubleshooting (Common Failures)
+
+### 13.1 `exited with code 1` during compose startup
+
+Use this sequence:
+
+```bash
+docker compose ps -a
+docker compose logs --tail=200 <service-name>
+```
+
+Most common causes in this project:
+1. Infra dependency not healthy yet (Postgres/Kafka/Config/Eureka).
+2. Bad or missing environment variable (`JWT_SECRET`, DB creds, etc.).
+3. Database init issue (duplicate `payment_db` creation in `init.sql`).
+4. Port conflicts on host (`8080`, `8761`, `8888`, etc.).
+
+### 13.2 Clean up disk safely
+
+```bash
+docker compose down -v
+docker system prune -f
+docker volume prune -f
+docker builder prune -f
+```
+
+For aggressive cleanup (removes unused images too):
+
+```bash
+docker system prune -a -f --volumes
+```
+
+---
+
+## 14) Useful Commands
+
+### Maven
+
+```bash
+# full build
+./mvnw clean package
+
+# tests only
+./mvnw test
+
+# build single module
+./mvnw -pl api-gateway clean package -DskipTests
+```
+
+### Docker Compose
+
+```bash
+# rebuild and start
+docker compose up --build
+
+# restart one service
+docker compose restart api-gateway
+
+# status
+docker compose ps -a
+```
+
+### Git quick update
+
+```bash
+git status
+git add -A
+git commit -m "docs: expand README with architecture, APIs, and operations"
+git push origin master
+```
+
+---
+
+## Notes
+
+- Compose warns that `version` in `docker-compose.yml` is obsolete in Compose v2; it can be removed safely.
+- Keep production secrets out of source-controlled compose files.
+- If you want, this README can also be split into:
+  - `docs/architecture.md`
+  - `docs/api.md`
+  - `docs/operations.md`
+  for easier maintenance.
