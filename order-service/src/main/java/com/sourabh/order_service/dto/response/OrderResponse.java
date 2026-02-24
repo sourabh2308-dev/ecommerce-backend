@@ -18,6 +18,15 @@ public class OrderResponse {
     private String status;
     private String paymentStatus;
     private List<OrderItemResponse> items;
+
+    // ── Shipping address ────────────────────────────────
+    private String shippingName;
+    private String shippingAddress;
+    private String shippingCity;
+    private String shippingState;
+    private String shippingPincode;
+    private String shippingPhone;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

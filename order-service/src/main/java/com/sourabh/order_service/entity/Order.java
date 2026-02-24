@@ -36,6 +36,14 @@ public class Order extends BaseAuditEntity {
     @Builder.Default
     private Boolean isDeleted = false;
 
+    // ── Shipping address ────────────────────────────────
+    private String shippingName;
+    private String shippingAddress;
+    private String shippingCity;
+    private String shippingState;
+    private String shippingPincode;
+    private String shippingPhone;
+
     @OneToMany(mappedBy = "order",
             cascade = CascadeType.ALL,
             orphanRemoval = true)
