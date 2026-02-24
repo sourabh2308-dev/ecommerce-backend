@@ -109,4 +109,33 @@ class PaymentServiceImplTest {
 
         assertThat(result).isIn("Payment SUCCESS", "Payment FAILED");
     }
+
+    @Test
+    @DisplayName("initiatePayment: amount is stored correctly in Payment entity")
+    void initiatePayment_amountStoredCorrectly() {
+        validRequest.setAmount(999.99);
+        when(paymentRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        paymentService.initiatePayment(validRequest, "BUYER", "buyer-uuid");
+
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository, atLeastOnce()).save(captor.capture());
+        
+        Payment savedPayment = captor.getAllValues().get(0);
+        assertThat(savedPayment.getAmount()).isEqualTo(999.99);
+    }
+
+    @Test
+    @DisplayName("initiatePayment: order UUID correctly passed through to Kafka event")
+    void initiatePayment_orderUuidInKafkaEvent() {
+        validRequest.setOrderUuid("special-order-123");
+        when(paymentRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        paymentService.initiatePayment(validRequest, "BUYER", "buyer-uuid");
+
+        ArgumentCaptor<PaymentCompletedEvent> eventCaptor = ArgumentCaptor.forClass(PaymentCompletedEvent.class);
+        verify(kafkaTemplate).send(eq("payment.completed"), eventCaptor.capture());
+
+        assertThat(eventCaptor.getValue().getOrderUuid()).isEqualTo("special-order-123");
+    }
 }

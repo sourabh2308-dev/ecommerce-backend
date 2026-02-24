@@ -128,4 +128,59 @@ class OrderRepositoryIntegrationTest {
         Page<Order> page = orderRepository.findOrdersBySeller("unknown-seller", PageRequest.of(0, 10));
         assertThat(page.getTotalElements()).isZero();
     }
+
+    @Test
+    @DisplayName("findByBuyerUuidAndIsDeletedFalse: excludes soft-deleted orders of same buyer")
+    void findByBuyerUuid_excludesDeletedOrders() {
+        Page<Order> page = orderRepository.findByBuyerUuidAndIsDeletedFalse("buyer-1", PageRequest.of(0, 10));
+        // buyer-1 has order1 (active) and deletedOrder (soft-deleted), should only return 1
+        assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("findByIsDeletedFalse: pagination works correctly")
+    void findByIsDeletedFalse_pagination() {
+        Page<Order> page1 = orderRepository.findByIsDeletedFalse(PageRequest.of(0, 1));
+        assertThat(page1.getTotalElements()).isEqualTo(2);
+        assertThat(page1.getTotalPages()).isEqualTo(2);
+        assertThat(page1.getSize()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("findByUuidAndIsDeletedFalse: exact UUID match required")
+    void findByUuid_exactMatch() {
+        Optional<Order> result1 = orderRepository.findByUuidAndIsDeletedFalse("order-buyer1-a");
+        Optional<Order> result2 = orderRepository.findByUuidAndIsDeletedFalse("order-buyer1-b");
+
+        assertThat(result1).isPresent();
+        assertThat(result2).isEmpty();
+    }
+
+    @Test
+    @DisplayName("findOrdersBySeller: seller with multiple orders")
+    void findOrdersBySeller_multipleOrdersForSeller() {
+        OrderItem item2 = OrderItem.builder()
+                .productUuid("prod-uuid-2")
+                .sellerUuid("seller-1")
+                .price(50.0)
+                .quantity(2)
+                .order(order2)
+                .build();
+        order2.getItems().add(item2);
+        orderRepository.save(order2);
+
+        Page<Order> page = orderRepository.findOrdersBySeller("seller-1", PageRequest.of(0, 10));
+        assertThat(page.getTotalElements()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("order with items persisted correctly")
+    void orderWithItems_persistedCorrectly() {
+        Optional<Order> foundOrder = orderRepository.findByUuidAndIsDeletedFalse("order-buyer1-a");
+        
+        assertThat(foundOrder).isPresent();
+        Order order = foundOrder.get();
+        assertThat(order.getItems()).hasSize(1);
+        assertThat(order.getItems().get(0).getProductUuid()).isEqualTo("prod-uuid");
+    }
 }

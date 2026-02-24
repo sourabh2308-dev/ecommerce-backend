@@ -269,6 +269,64 @@ class ReviewServiceImplTest {
     // Helper
     // ─────────────────────────────────────────────────
 
+    @Test
+    @DisplayName("createReview: rating validation - minimum rating 1")
+    void createReview_minimumRating() {
+        createRequest.setRating(1);
+        when(orderServiceClient.getOrder("order-uuid")).thenReturn(deliveredOrder);
+        when(reviewRepository.existsByProductUuidAndBuyerUuid("prod-uuid", "buyer-uuid")).thenReturn(false);
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ReviewResponse result = reviewService.createReview(createRequest, "buyer-uuid");
+
+        assertThat(result.getRating()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("createReview: rating validation - maximum rating 5")
+    void createReview_maximumRating() {
+        createRequest.setRating(5);
+        when(orderServiceClient.getOrder("order-uuid")).thenReturn(deliveredOrder);
+        when(reviewRepository.existsByProductUuidAndBuyerUuid("prod-uuid", "buyer-uuid")).thenReturn(false);
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ReviewResponse result = reviewService.createReview(createRequest, "buyer-uuid");
+
+        assertThat(result.getRating()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("getReviewsByProduct: returns empty page for unknown product")
+    void getReviewsByProduct_unknownProduct_empty() {
+        var emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        when(reviewRepository.findByProductUuid(eq("unknown-prod"), any())).thenReturn(emptyPage);
+
+        PageResponse<ReviewResponse> response = reviewService.getReviewsByProduct("unknown-prod", 0, 10);
+
+        assertThat(response.getContent()).isEmpty();
+        assertThat(response.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("deleteReview: not found throws ReviewNotFoundException")
+    void deleteReview_notFound() {
+        when(reviewRepository.findByUuid("bad-uuid")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> reviewService.deleteReview("bad-uuid", "BUYER", "buyer-uuid"))
+                .isInstanceOf(ReviewNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("getMyReviews: returns empty page when buyer has no reviews")
+    void getMyReviews_noReviews() {
+        var emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        when(reviewRepository.findByBuyerUuid(eq("buyer-uuid"), any())).thenReturn(emptyPage);
+
+        PageResponse<ReviewResponse> response = reviewService.getMyReviews("buyer-uuid", 0, 10);
+
+        assertThat(response.getContent()).isEmpty();
+    }
+
     private Review buildReview(String uuid, String productUuid, String buyerUuid) {
         return Review.builder()
                 .uuid(uuid)

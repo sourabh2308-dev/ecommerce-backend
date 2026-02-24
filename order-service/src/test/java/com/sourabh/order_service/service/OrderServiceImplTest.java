@@ -2,6 +2,7 @@ package com.sourabh.order_service.service;
 
 import com.sourabh.order_service.dto.ProductDto;
 import com.sourabh.order_service.dto.request.CreateOrderRequest;
+import com.sourabh.order_service.dto.request.OrderItemRequest;
 import com.sourabh.order_service.dto.response.OrderResponse;
 import com.sourabh.order_service.entity.Order;
 import com.sourabh.order_service.entity.OrderStatus;
@@ -66,12 +67,18 @@ class OrderServiceImplTest {
     // createOrder
     // ──────────────────────────────────────────────────────
 
+    private OrderItemRequest makeItem(String productUuid, int quantity) {
+        OrderItemRequest item = new OrderItemRequest();
+        item.setProductUuid(productUuid);
+        item.setQuantity(quantity);
+        return item;
+    }
+
     @Test
     @DisplayName("createOrder: success — buyer creates valid order")
     void createOrder_success() {
         CreateOrderRequest req = new CreateOrderRequest();
-        req.setProductUuid("prod-uuid");
-        req.setQuantity(2);
+        req.setItems(List.of(makeItem("prod-uuid", 2)));
 
         when(productServiceClient.getProduct("prod-uuid")).thenReturn(activeProduct);
         when(orderRepository.save(any())).thenReturn(sampleOrder);
@@ -87,8 +94,7 @@ class OrderServiceImplTest {
     @DisplayName("createOrder: fails — non-buyer role rejected")
     void createOrder_nonBuyer_throwsOrderAccessException() {
         CreateOrderRequest req = new CreateOrderRequest();
-        req.setProductUuid("prod-uuid");
-        req.setQuantity(1);
+        req.setItems(List.of(makeItem("prod-uuid", 1)));
 
         assertThatThrownBy(() -> orderService.createOrder(req, "SELLER", "seller-uuid"))
                 .isInstanceOf(OrderAccessException.class)
@@ -102,8 +108,7 @@ class OrderServiceImplTest {
     void createOrder_inactiveProduct_throwsOrderStateException() {
         activeProduct.setStatus("INACTIVE");
         CreateOrderRequest req = new CreateOrderRequest();
-        req.setProductUuid("prod-uuid");
-        req.setQuantity(1);
+        req.setItems(List.of(makeItem("prod-uuid", 1)));
 
         when(productServiceClient.getProduct("prod-uuid")).thenReturn(activeProduct);
 
@@ -235,5 +240,75 @@ class OrderServiceImplTest {
 
         assertThat(sampleOrder.getStatus()).isEqualTo(OrderStatus.CREATED);
         assertThat(sampleOrder.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+    }
+
+    // Additional edge case tests
+
+    @Test
+    @DisplayName("createOrder: multiple items with different sellers")
+    void createOrder_multipleSellerItems() {
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setItems(List.of(
+                makeItem("prod-uuid-1", 2),
+                makeItem("prod-uuid-2", 1)
+        ));
+
+        ProductDto product1 = new ProductDto();
+        product1.setUuid("prod-uuid-1");
+        product1.setStatus("ACTIVE");
+        product1.setPrice(100.0);
+        product1.setSellerUuid("seller-1");
+
+        ProductDto product2 = new ProductDto();
+        product2.setUuid("prod-uuid-2");
+        product2.setStatus("ACTIVE");
+        product2.setPrice(50.0);
+        product2.setSellerUuid("seller-2");
+
+        when(productServiceClient.getProduct("prod-uuid-1")).thenReturn(product1);
+        when(productServiceClient.getProduct("prod-uuid-2")).thenReturn(product2);
+        when(orderRepository.save(any())).thenReturn(sampleOrder);
+
+        OrderResponse response = orderService.createOrder(req, "BUYER", "buyer-uuid");
+
+        assertThat(response).isNotNull();
+        verify(productServiceClient).reduceStock("prod-uuid-1", 2);
+        verify(productServiceClient).reduceStock("prod-uuid-2", 1);
+    }
+
+    @Test
+    @DisplayName("createOrder: empty items list fails")
+    void createOrder_emptyItems_throwsException() {
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setItems(List.of());
+
+        assertThatThrownBy(() -> orderService.createOrder(req, "BUYER", "buyer-uuid"))
+                .isInstanceOf(Exception.class);
+
+        verifyNoInteractions(productServiceClient, orderRepository);
+    }
+
+    @Test
+    @DisplayName("getOrderByUuid: returns order details correctly mapped")
+    void getOrderByUuid_mapsAllFields() {
+        when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid"))
+                .thenReturn(Optional.of(sampleOrder));
+
+        OrderResponse response = orderService.getOrderByUuid("order-uuid", "BUYER", "buyer-uuid");
+
+        assertThat(response.getUuid()).isEqualTo("order-uuid");
+        assertThat(response.getTotalAmount()).isEqualTo(100.0);
+        assertThat(response.getStatus()).isEqualTo("CREATED");
+        assertThat(response.getPaymentStatus()).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("updatePaymentStatus: order not found throws exception")
+    void updatePaymentStatus_orderNotFound() {
+        when(orderRepository.findByUuidAndIsDeletedFalse("bad-uuid"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.updatePaymentStatus("bad-uuid", "SUCCESS"))
+                .isInstanceOf(OrderNotFoundException.class);
     }
 }
