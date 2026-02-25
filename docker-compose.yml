@@ -11,13 +11,21 @@ x-common-env: &common-env
   CONFIG_SERVER_URL: http://config-server:8888
   REDIS_HOST: redis
   REDIS_PORT: 6379
-  JAVA_TOOL_OPTIONS: -XX:+UseContainerSupport -XX:InitialRAMPercentage=5 -XX:MaxRAMPercentage=55 -Djava.security.egd=file:/dev/./urandom
+  JAVA_TOOL_OPTIONS: -XX:+UseContainerSupport -XX:InitialRAMPercentage=5 -XX:MaxRAMPercentage=50 -Djava.security.egd=file:/dev/./urandom
+
+# Shared logging configuration to prevent disk space issues
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
 
   postgres:
     image: postgres:15
-    mem_limit: 512m
+    mem_limit: 384m
+    logging: *default-logging
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -35,7 +43,8 @@ services:
 
   redis:
     image: redis:7
-    mem_limit: 128m
+    mem_limit: 96m
+    logging: *default-logging
     ports:
       - "6379:6379"
     healthcheck:
@@ -47,7 +56,8 @@ services:
 
   kafka:
     image: apache/kafka:3.7.0
-    mem_limit: 768m
+    mem_limit: 512m
+    logging: *default-logging
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -59,7 +69,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-      KAFKA_HEAP_OPTS: -Xms128m -Xmx384m
+      KAFKA_HEAP_OPTS: -Xms64m -Xmx256m
     ports:
       - "29092:29092"
     healthcheck:
@@ -71,7 +81,9 @@ services:
 
   zipkin:
     image: openzipkin/zipkin:3
-    mem_limit: 192m
+    mem_limit: 256m
+    environment:
+      JAVA_OPTS: "-Xms64m -Xmx192m -XX:+UseContainerSupport"
     ports:
       - "9411:9411"
     healthcheck:
@@ -85,9 +97,10 @@ services:
     build:
       context: .
       dockerfile: ./eureka-server/dockerfile
+    logging: *default-logging
     ports:
       - "8761:8761"
-    mem_limit: 384m
+    mem_limit: 256m
     environment:
       <<: *common-env
     healthcheck:
@@ -101,11 +114,12 @@ services:
     build:
       context: .
       dockerfile: ./config-server/dockerfile
+    logging: *default-logging
     ports:
       - "8888:8888"
     environment:
       <<: *common-env
-    mem_limit: 384m
+    mem_limit: 256m
     depends_on:
       eureka-server:
         condition: service_healthy
@@ -120,9 +134,10 @@ services:
     build:
       context: .
       dockerfile: ./auth-service/dockerfile
+    logging: *default-logging
     environment:
       <<: *common-env
-    mem_limit: 512m
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,9 +154,10 @@ services:
     build:
       context: .
       dockerfile: ./user-service/dockerfile
+    logging: *default-logging
     environment:
       <<: *common-env
-    mem_limit: 512m
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,9 +174,10 @@ services:
     build:
       context: .
       dockerfile: ./product-service/dockerfile
+    logging: *default-logging
     environment:
       <<: *common-env
-    mem_limit: 640m
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,9 +194,10 @@ services:
     build:
       context: .
       dockerfile: ./order-service/dockerfile
+    logging: *default-logging
     environment:
       <<: *common-env
-    mem_limit: 640m
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -196,9 +214,10 @@ services:
     build:
       context: .
       dockerfile: ./review-service/dockerfile
+    logging: *default-logging
     environment:
       <<: *common-env
-    mem_limit: 640m
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -215,9 +234,10 @@ services:
     build:
       context: .
       dockerfile: ./payment-service/dockerfile
+    logging: *default-logging
     environment:
       <<: *common-env
-    mem_limit: 640m
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -234,9 +254,10 @@ services:
     build:
       context: .
       dockerfile: ./api-gateway/dockerfile
+    logging: *default-logging
     ports:
       - "8080:8080"
-    mem_limit: 512m
+    mem_limit: 384m
     environment:
       <<: *common-env
     depends_on:
@@ -262,6 +283,7 @@ services:
   frontend:
     build: ../ecommerce-frontend
     mem_limit: 192m
+    logging: *default-logging
     profiles: ["full"]
     ports:
       - "3001:80"
@@ -271,6 +293,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.51.0
     mem_limit: 256m
+    logging: *default-logging
     profiles: ["full"]
     ports:
       - "9090:9090"
@@ -287,6 +310,7 @@ services:
   grafana:
     image: grafana/grafana:10.4.0
     mem_limit: 256m
+    logging: *default-logging
     profiles: ["full"]
     ports:
       - "3000:3000"

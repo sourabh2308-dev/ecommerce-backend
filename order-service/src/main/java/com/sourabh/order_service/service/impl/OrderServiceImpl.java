@@ -34,21 +34,46 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.UUID;
 
-/**\n * ═══════════════════════════════════════════════════════════════════════════════════\n * ORDER SERVICE IMPLEMENTATION - Core Order Processing Logic\n * ═══════════════════════════════════════════════════════════════════════════════════\n *\n * PURPOSE:\n * This service orchestrates the complete order lifecycle including creation, validation,\n * status transitions, and payment saga coordination. It acts as the core business logic\n * layer for order management in the e-commerce system.\n *\n * KEY RESPONSIBILITIES:\n * 1. Order Validation & Creation\n *    - Validate buyer role (only BUYER can place orders)\n *    - Fetch product details and verify availability\n *    - Synchronously reduce stock from product-service (Feign client)\n *    - Calculate order totals and persist to database\n *\n * 2. Event Publishing (Saga Pattern)\n *    - Publish \"order.created\" Kafka event for payment-service\n *    - Enable asynchronous payment processing\n *    - Maintain event ordering per buyer (single partition)\n *\n * 3. Payment Saga Coordination\n *    - Listen for \"payment.completed\" events from payment-service\n *    - Update order payment status (SUCCESS/FAILED)\n *    - Execute saga compensation (restore stock if payment fails)\n *\n * 4. Order Status Management\n *    - Enforce valid state transitions: CREATED → CONFIRMED → SHIPPED → DELIVERED\n *    - Support role-based status updates (BUYER cancels, ADMIN/SELLER advance)\n *    - Prevent invalid transitions (e.g., DELIVERED → CONFIRMED)\n *\n * 5. Order Query & Retrieval\n *    - Support pagination for buyer's orders and seller's orders\n *    - Enforce access control (buyers see only their orders)\n *    - Cache frequently accessed orders (Redis via @Cacheable)\n *\n * DATABASE DESIGN:\n * - Order: Aggregator root, contains buyer UUID, total amount, status, payment status\n * - OrderItem: One-to-many relationship with Order, tracks product per seller\n * - Soft deletes: Orders never physically deleted (isDeleted flag)\n * - Audit: createdAt, updatedAt timestamps for tracking\n *\n * KAFKA TOPICS:\n * - order.created: Published when order is persisted\n *   Event payload: orderUuid, buyerUuid, totalAmount, items[]\n *   Consumption: payment-service initiates payment processing\n *   Partition key: buyerUuid (ensures ordered processing per buyer)\n *\n * EXTERNAL DEPENDENCIES:\n * 1. ProductServiceClient (Feign)\n *    - getProduct(uuid): Fetch product details\n *    - reduceStock(uuid, qty): Synchronously reduce stock (fails if insufficient)\n *    - restoreStock(uuid, qty): Compensation logic if order fails\n *\n * 2. OrderRepository (Spring Data JPA)\n *    - Custom queries for pagination and filtering\n *    - Soft-delete filtering (WHERE isDeleted = false)\n *\n * 3. KafkaTemplate\n *    - Send order.created events to payment-service\n *    - Non-blocking, returns immediately\n *\n * CACHING STRATEGY:\n * - @Cacheable(value=\"orders\", key=\"#uuid\"): Cache getOrderByUuid() results\n * - @CacheEvict on updates: Invalidate cache when order status changes\n * - TTL: Configurable, typically 5-10 minutes\n * - Key benefit: Reduce database hits for frequently viewed orders\n *\n * ERROR HANDLING:\n * - OrderAccessException: Role/ownership validation failures\n * - OrderNotFoundException: Order not found in database\n * - OrderStateException: Invalid state transitions, product issues\n * - FeignException: Product-service communication failures (with compensation)\n *\n * TRANSACTION MANAGEMENT:\n * - @Transactional on create/update methods ensures ACID compliance\n * - Database transaction includes:\n *   1. Stock reduction calls (may fail, preventing order creation)\n *   2. Order entity insertion with all items\n *   3. Kafka publish happens within same transaction (transactional outbox could be added)\n * - Rollback: If any step fails, entire transaction rolls back\n *\n * SAGA PATTERN IMPLEMENTATION:\n * ┌─────────────────────────────────────────┐\n * │ Order Creation (Synchronous)            │\n * │ 1. Validate stock                       │\n * │ 2. Create Order                         │\n * │ 3. Publish order.created event          │\n * └─────────────────────────────────────────┘\n *              │\n *              ▼\n * ┌─────────────────────────────────────────┐\n * │ Payment Processing (Asynchronous via Saga)\n * │ 1. payment-service consumes event       │\n * │ 2. Create Payment entity                │\n * │ 3. Simulate payment (100% success)      │\n * │ 4. Publish payment.completed event      │\n * └─────────────────────────────────────────┘\n *              │\n *              ▼\n * ┌─────────────────────────────────────────┐\n * │ Order Update (updatePaymentStatus)      │\n * │ If SUCCESS: paymentStatus = SUCCESS     │\n * │ If FAILED: status = CANCELLED           │\n * │            Restore stock (compensation) │\n * └─────────────────────────────────────────┘\n *\n * TECHNOLOGY STACK:\n * - @Service: Spring component, singleton bean for service layer\n * - @RequiredArgsConstructor: Lombok generates constructor for final fields\n * - @Slf4j: SLF4J logging with Logback backend\n * - @Transactional: Spring Data JPA transaction management\n * - KafkaTemplate: Spring Kafka for event publishing\n * - Feign: Declarative REST client for product-service calls\n *\n * PERFORMANCE CONSIDERATIONS:\n * - Caching orders reduces database queries\n * - Async Kafka prevents blocking on payment processing\n * - API Gateway handles JWT validation (not done here)\n * - Pagination prevents loading thousands of orders\n *\n * THREAD SAFETY:\n * - Service is stateless (no instance variables)\n * - Spring manages as singleton, safe for concurrent access\n * - Database provides isolation via transactions\n * - Kafka ensures ordered delivery per partition\n *\n * TESTING STRATEGY:\n * Unit Tests:\n *   - createOrder_success(): Valid order creation with stock reduction\n *   - createOrder_multipleSellerItems(): Mixed seller order\n *   - createOrder_emptyItems_throwsException(): Validation\n *   - updatePaymentStatus on SUCCESS/FAILED paths\n *\n * Integration Tests (with Testcontainers PostgreSQL):\n *   - OrderRepositoryIntegrationTest covers persistence\n *\n * MODIFICATIONS CHECKLIST:\n * When adding new features:\n * - [ ] Add new method to OrderService interface\n * - [ ] Document purpose and contract\n * - [ ] Add @Transactional if modifying state\n * - [ ] Add @Cacheable/@CacheEvict appropriately\n * - [ ] Add authorization check (@PreAuthorize or manual check)\n * - [ ] Add error handling with appropriate exceptions\n * - [ ] Add logging at INFO level for business events\n * - [ ] Add unit tests with >= 80% coverage\n * - [ ] Update this class javadoc\n * ═══════════════════════════════════════════════════════════════════════════════════\n */\n@Service\n@RequiredArgsConstructor\n@Slf4j\npublic class OrderServiceImpl implements OrderService {
+/**
+ * ORDER SERVICE IMPLEMENTATION - Core Order Processing Logic
+ *
+ * Orchestrates complete order lifecycle: creation, validation, status transitions, and payment saga.
+ * Uses Feign for sync product-service calls, Kafka for async payment events.
+ *
+ * SAGA PATTERN:
+ * 1. createOrder: Validate + persist + publish order.created event
+ * 2. payment-service: Consumes event, processes payment, publishes payment.completed
+ * 3. updatePaymentStatus: Receives event, updates status + compensates if needed
+ *
+ * COMPENSATION:
+ * If payment fails, cancels order and restores product stock via productServiceClient
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductServiceClient productServiceClient;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    /**
-     * Kafka topic name for order creation events.
-     * Consumed by payment-service to initiate payment processing.
-     * Topic partitioning by buyerUuid ensures ordered processing per buyer.
-     */
     private static final String TOPIC_ORDER_CREATED = "order.created";
 
-    /**\n     * ───────────────────────────────────────────────────────────────────────────\n     * CREATE ORDER - Primary Entry Point for Order Placement\n     * ───────────────────────────────────────────────────────────────────────────\n     *\n     * FLOW OVERVIEW:\n     * 1. Validate buyer role (only BUYER role can place orders)\n     * 2. Fetch product details from product-service via Feign client\n     * 3. Validate product status (must be ACTIVE)\n     * 4. Reduce stock synchronously for all products (with compensation)\n     * 5. Build Order entity with all items and calculate total amount\n     * 6. Persist Order to database (triggers audit timestamps)\n     * 7. Publish order.created Kafka event for asynchronous payment processing\n     * 8. Return OrderResponse to caller for immediate feedback\n     *\n     * PARAMETERS:\n     * @param request - CreateOrderRequest containing:\n     *                  - items[]: List of {productUuid, quantity} to order\n     *                  - shipping*: Address, name, phone for delivery\n     * @param role - User role from JWT (must be \"BUYER\")\n     * @param buyerUuid - Unique identifier of user placing order\n     *\n     * AUTHORIZATION:\n     * - Role check: Throws OrderAccessException if role != \"BUYER\"\n     * - Implicit: buyerUuid comes from JWT, verified by API Gateway\n     *\n     * VALIDATION:\n     * - Reject if product not found in product-service\n     * - Reject if product status != ACTIVE\n     * - Reject if stock < requested quantity\n     * - Reject if request items list is empty (validated by @Valid)\n     *\n     * COMPENSATION (SAGA ROLLBACK):\n     * If stock reduction fails on any product:\n     *   1. Capture which products already reduced (reducedProductUuids list)\n     *   2. Call productServiceClient.restoreStock() for each\n     *   3. Log failures but continue (eventual consistency)\n     *   4. Throw OrderStateException with original error message\n     *\n     * DATABASE TRANSACTION:\n     * @Transactional ensures:\n     *   - All OrderItem entities saved with Order\n     *   - If any insert fails, entire transaction rolls back\n     *   - Stock reduction calls happen before Order insert (prevents orphaned orders)\n     *   - Note: Kafka publish happens within transaction (transactional outbox pattern recommended)\n     *\n     * KAFKA EVENT PUBLISHING:\n     * After Order persisted, publishevent:\n     *   Topic: order.created\n     *   Partition key: buyerUuid (ensures per-buyer ordering)\n     *   Payload:\n     *   {\n     *     orderUuid: \"abc-123\",\n     *     buyerUuid: \"buyer-uuid\",\n     *     totalAmount: 1500.00,\n     *     items: [\n     *       {productUuid, sellerUuid, price, quantity, subtotal}\n     *     ]\n     *   }\n     *   Consumer: payment-service consumes and initiates payment\n     *\n     * CACHING:\n     * Order is NOT cached after creation (first access caches it via getOrderByUuid)\n     *\n     * RETURN VALUE:\n     * OrderResponse with all order details for immediate feedback (before payment processing)\n     *\n     * EXCEPTIONS:\n     * - OrderAccessException: Role != \"BUYER\"\n     * - OrderStateException: Product inactive, stock issues, Feign errors\n     * - DataIntegrityViolationException: Database constraint violation (caught by Spring)\n     *\n     * LOGGING:\n     * - INFO: Order created, number of items, order UUID\n     * - ERROR: Stock restoration failures (non-fatal)\n     *\n     * PERFORMANCE:\n     * O(n) where n = number of items\n     * - n product fetches via Feign\n     * - n stock reduction calls via Feign\n     * - Parallelizable prefetching could optimize (not implemented)\n     *\n     * ───────────────────────────────────────────────────────────────────────────\n     */
-
+    /**
+     * Creates new order with items and shipping details, triggers payment saga.
+     *
+     * Steps:
+     * 1. Validate buyer role (only BUYER can create)
+     * 2. Fetch all products, validate ACTIVE status
+     * 3. Reduce stock for all products (with compensation on failure)
+     * 4. Persist Order with OrderItems to DB
+     * 5. Publish order.created Kafka event (triggers payment-service)
+     * 6. Return order response with paymentStatus = PENDING
+     *
+     * Compensation: If stock reduction fails on item N, restores stock for items 0..N-1
+     *
+     * Exceptions: OrderAccessException (not BUYER), OrderStateException (product issues)
+     */
     @Override
     @Transactional
     public OrderResponse createOrder(CreateOrderRequest request, String role, String buyerUuid) {
@@ -98,10 +123,8 @@ import java.util.UUID;
         Order order = Order.builder()
                 .uuid(UUID.randomUUID().toString())
                 .buyerUuid(buyerUuid)
-                .totalAmount(0.0)
                 .status(OrderStatus.CREATED)
                 .paymentStatus(PaymentStatus.PENDING)
-                .isDeleted(false)
                 .shippingName(request.getShippingName())
                 .shippingAddress(request.getShippingAddress())
                 .shippingCity(request.getShippingCity())
@@ -113,47 +136,51 @@ import java.util.UUID;
         for (int i = 0; i < request.getItems().size(); i++) {
             OrderItemRequest itemReq = request.getItems().get(i);
             ProductDto product = products.get(i);
-            double subtotal = product.getPrice() * itemReq.getQuantity();
-            totalAmount += subtotal;
+            double itemTotal = product.getPrice() * itemReq.getQuantity();
+            totalAmount += itemTotal;
 
-            OrderItem item = OrderItem.builder()
-                    .productUuid(product.getUuid())
+            OrderItem orderItem = OrderItem.builder()
+                    .order(order)
+                    .productUuid(itemReq.getProductUuid())
                     .sellerUuid(product.getSellerUuid())
                     .price(product.getPrice())
                     .quantity(itemReq.getQuantity())
-                    .order(order)
                     .build();
-            orderItems.add(item);
+            orderItems.add(orderItem);
 
-            itemEvents.add(new OrderItemEvent(
-                    product.getUuid(),
-                    product.getSellerUuid(),
-                    product.getPrice(),
-                    itemReq.getQuantity(),
-                    subtotal));
+            OrderItemEvent itemEvent = new OrderItemEvent();
+            itemEvent.setProductUuid(itemReq.getProductUuid());
+            itemEvent.setSellerUuid(product.getSellerUuid());
+            itemEvent.setPrice(product.getPrice());
+            itemEvent.setQuantity(itemReq.getQuantity());
+            itemEvent.setSubtotal(itemTotal);
+            itemEvents.add(itemEvent);
         }
 
         order.setTotalAmount(totalAmount);
         order.setItems(orderItems);
-        orderRepository.save(order);
 
-        // Saga: publish order.created so payment-service can auto-process payment
-        kafkaTemplate.send(TOPIC_ORDER_CREATED,
-                new OrderCreatedEvent(order.getUuid(), buyerUuid, itemEvents, totalAmount));
+        Order savedOrder = orderRepository.save(order);
 
-        log.info("Order created with {} items, order.created event published: orderUuid={}",
-                orderItems.size(), order.getUuid());
-        return mapToResponse(order);
+        // Publish event for payment-service
+        OrderCreatedEvent event = new OrderCreatedEvent(
+                savedOrder.getUuid(),
+                savedOrder.getBuyerUuid(),
+                itemEvents,
+                savedOrder.getTotalAmount());
+        kafkaTemplate.send(TOPIC_ORDER_CREATED, savedOrder.getBuyerUuid(), event);
+
+        log.info("Order created: uuid={}, buyerUuid={}, items={}", savedOrder.getUuid(), buyerUuid, orderItems.size());
+        return mapToResponse(savedOrder);
     }
 
     @Override
     public PageResponse<OrderResponse> listOrders(int page, int size, String role, String buyerUuid) {
-
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
-        Page<Order> orderPage = "BUYER".equalsIgnoreCase(role)
-                ? orderRepository.findByBuyerUuidAndIsDeletedFalse(buyerUuid, pageable)
-                : orderRepository.findByIsDeletedFalse(pageable);
+        Page<Order> orderPage = "ADMIN".equalsIgnoreCase(role)
+                ? orderRepository.findByIsDeletedFalse(pageable)
+                : orderRepository.findByBuyerUuidAndIsDeletedFalse(buyerUuid, pageable);
 
         return toPageResponse(orderPage);
     }
@@ -161,42 +188,28 @@ import java.util.UUID;
     @Override
     public PageResponse<OrderResponse> listSellerOrders(int page, int size, String sellerUuid) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return toPageResponse(orderRepository.findOrdersBySeller(sellerUuid, pageable));
-    }
-
-    @Override
-    @Transactional
-    @CacheEvict(value = "orders", key = "#uuid")
-    public OrderResponse updateOrderStatus(String uuid, String role, String buyerUuid, String newStatus) {
-
-        Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
-                .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
-
-        OrderStatus requestedStatus = OrderStatus.valueOf(newStatus.toUpperCase());
-
-        if ("BUYER".equalsIgnoreCase(role)) {
-            return cancelByBuyer(order, buyerUuid, requestedStatus);
-        }
-        if ("ADMIN".equalsIgnoreCase(role)) {
-            return advanceByAdmin(order, requestedStatus);
-        }
-        if ("SELLER".equalsIgnoreCase(role)) {
-            return advanceBySeller(order, buyerUuid, requestedStatus);
-        }
-
-        throw new OrderAccessException("Unauthorized action");
+        Page<Order> orderPage = orderRepository.findOrdersBySeller(sellerUuid, pageable);
+        return toPageResponse(orderPage);
     }
 
     @Override
     @Cacheable(value = "orders", key = "#uuid")
     public OrderResponse getOrderByUuid(String uuid, String role, String userUuid) {
-        log.debug("Cache miss for order uuid={} — fetching from DB", uuid);
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
 
-        // Buyers can only see their own orders
+        // Authorization: buyers see only their orders
         if ("BUYER".equalsIgnoreCase(role) && !order.getBuyerUuid().equals(userUuid)) {
             throw new OrderAccessException("You can only view your own orders");
+        }
+
+        // Sellers see orders containing their items
+        if ("SELLER".equalsIgnoreCase(role)) {
+            boolean hasItems = order.getItems() != null && order.getItems().stream()
+                    .anyMatch(item -> userUuid.equals(item.getSellerUuid()));
+            if (!hasItems) {
+                throw new OrderAccessException("You have no items in this order");
+            }
         }
 
         return mapToResponse(order);
@@ -205,26 +218,31 @@ import java.util.UUID;
     @Override
     @Transactional
     @CacheEvict(value = "orders", key = "#uuid")
+    public OrderResponse updateOrderStatus(String uuid, String role, String userUuid, String newStatusStr) {
+        Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
+                .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
+
+        OrderStatus requestedStatus;
+        try {
+            requestedStatus = OrderStatus.valueOf(newStatusStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new OrderStateException("Invalid order status: " + newStatusStr);
+        }
+
+        OrderResponse response = switch (role.toUpperCase()) {
+            case "BUYER" -> cancelByBuyer(order, userUuid, requestedStatus);
+            case "ADMIN" -> advanceByAdmin(order, requestedStatus);
+            case "SELLER" -> advanceBySeller(order, userUuid, requestedStatus);
+            default -> throw new OrderAccessException("Unauthorized role: " + role);
+        };
+
+        return response;
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "orders", key = "#uuid")
     public void updatePaymentStatus(String uuid, String status) {
-        /**
-         * UPDATE PAYMENT STATUS - Saga Pattern Coordination Point
-         *
-         * CONTEXT:
-         * Called by payment-service via internal REST call (HTTP POST)
-         * after payment processing completes (success or failure).
-         * This is the synchronization point between two services in the saga pattern.
-         *
-         * FLOW:
-         * 1. Fetch Order by UUID (throws OrderNotFoundException if not found)
-         * 2. Parse payment status string to enum (PENDING, SUCCESS, FAILED)
-         * 3. Update order.paymentStatus with new status
-         * 4. If status == FAILED, cascade to cancel order and restore stock
-         * 5. Persist updated Order
-         * 6. Invalidate Redis cache (force next fetch from DB)
-         *
-         * PARAMETERS:
-         * @param uuid - Order UUID to update
-         * @param status - Payment status from payment-service (\"SUCCESS\" or \"FAILED\")\n         *\n         * SAGA COMPENSATION:\n         * If payment failed (status == \"FAILED\"):\n         *   1. Update order.status to CANCELLED\n         *   2. Iterate through all OrderItems\n         *   3. Call productServiceClient.restoreStock() for each item\n         *   4. Non-blocking: Continue even if restore fails (log error)\n         * Benefit: Prevents indefinitely locked stock if payment fails\n         *\n         * CACHING:\n         * @CacheEvict(value=\"orders\", key=\"#uuid\") invalidates cached entry\n         * Forces next getOrderByUuid() call to fetch fresh data from DB\n         *\n         * DATABASE TRANSACTION:\n         * @Transactional ensures atomic update of order status and payment status\n         */
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
 
@@ -239,9 +257,7 @@ import java.util.UUID;
         log.info("Payment status updated: orderUuid={}, paymentStatus={}", uuid, status);
     }
 
-    // ─────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────
+    // Private helper methods
 
     private OrderResponse cancelByBuyer(Order order, String buyerUuid, OrderStatus requestedStatus) {
         if (!order.getBuyerUuid().equals(buyerUuid)) {

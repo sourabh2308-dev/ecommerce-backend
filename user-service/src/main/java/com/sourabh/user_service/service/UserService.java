@@ -1,11 +1,9 @@
 package com.sourabh.user_service.service;
 
 import com.sourabh.user_service.common.PageResponse;
-import com.sourabh.user_service.dto.request.ChangePasswordRequest;
-import com.sourabh.user_service.dto.request.RegisterRequest;
-import com.sourabh.user_service.dto.request.UpdateProfileRequest;
-import com.sourabh.user_service.dto.request.VerifyOTPRequest;
+import com.sourabh.user_service.dto.request.*;
 import com.sourabh.user_service.dto.response.InternalUserDto;
+import com.sourabh.user_service.dto.response.SellerDetailResponse;
 import com.sourabh.user_service.dto.response.UserResponse;
 
 public interface UserService {
@@ -23,6 +21,17 @@ public interface UserService {
     UserResponse updateProfile(String userUuid, UpdateProfileRequest request);
 
     String changePassword(String userUuid, ChangePasswordRequest request);
+
+    // ─── Seller verification ─────────────────────────────────────────────────
+
+    /** Seller submits business and ID verification details */
+    SellerDetailResponse submitSellerDetails(String userUuid, SellerDetailRequest request);
+
+    /** Seller views their own submitted details */
+    SellerDetailResponse getSellerDetails(String userUuid);
+
+    /** Admin views a seller's submitted details before approving */
+    SellerDetailResponse getSellerDetailsByAdmin(String sellerUuid);
 
     // ─── Admin ───────────────────────────────────────────────────────────────
 

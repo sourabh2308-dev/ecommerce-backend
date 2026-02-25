@@ -1,8 +1,7 @@
 package com.sourabh.payment_service.controller;
 
 import com.sourabh.payment_service.common.PageResponse;
-import com.sourabh.payment_service.dto.PaymentRequest;
-import com.sourabh.payment_service.dto.PaymentResponse;
+import com.sourabh.payment_service.dto.*;
 import com.sourabh.payment_service.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -69,5 +68,38 @@ public class PaymentController {
         String role      = httpRequest.getHeader("X-User-Role");
         String buyerUuid = httpRequest.getHeader("X-User-UUID");
         return ResponseEntity.ok(paymentService.getPaymentByOrderUuid(orderUuid, role, buyerUuid));
+    }
+
+    // =========================
+    // SELLER: MY PAYMENTS (paginated splits)
+    // =========================
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/seller")
+    public ResponseEntity<PageResponse<PaymentSplitResponse>> getSellerPayments(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            HttpServletRequest httpRequest) {
+        String sellerUuid = httpRequest.getHeader("X-User-UUID");
+        return ResponseEntity.ok(paymentService.getSellerPayments(sellerUuid, page, size));
+    }
+
+    // =========================
+    // SELLER: FINANCIAL DASHBOARD
+    // =========================
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/seller/dashboard")
+    public ResponseEntity<SellerDashboardResponse> getSellerDashboard(
+            HttpServletRequest httpRequest) {
+        String sellerUuid = httpRequest.getHeader("X-User-UUID");
+        return ResponseEntity.ok(paymentService.getSellerDashboard(sellerUuid));
+    }
+
+    // =========================
+    // ADMIN: FINANCIAL DASHBOARD
+    // =========================
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/admin/dashboard")
+    public ResponseEntity<AdminDashboardResponse> getAdminDashboard() {
+        return ResponseEntity.ok(paymentService.getAdminDashboard());
     }
 }

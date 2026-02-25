@@ -2,11 +2,9 @@ package com.sourabh.user_service.controller;
 
 import com.sourabh.user_service.common.ApiResponse;
 import com.sourabh.user_service.common.PageResponse;
-import com.sourabh.user_service.dto.request.ChangePasswordRequest;
-import com.sourabh.user_service.dto.request.RegisterRequest;
-import com.sourabh.user_service.dto.request.UpdateProfileRequest;
-import com.sourabh.user_service.dto.request.VerifyOTPRequest;
+import com.sourabh.user_service.dto.request.*;
 import com.sourabh.user_service.dto.response.InternalUserDto;
+import com.sourabh.user_service.dto.response.SellerDetailResponse;
 import com.sourabh.user_service.dto.response.UserResponse;
 import com.sourabh.user_service.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -80,8 +78,40 @@ public class UserController {
     }
 
     // ─────────────────────────────────────────────
+    // SELLER VERIFICATION ROUTES
+    // ─────────────────────────────────────────────
+
+    /** Seller submits business and ID verification details. */
+    @PreAuthorize("hasRole('SELLER')")
+    @PostMapping("/me/seller-details")
+    public ResponseEntity<ApiResponse<SellerDetailResponse>> submitSellerDetails(
+            @Valid @RequestBody SellerDetailRequest body,
+            HttpServletRequest request) {
+        String userUuid = request.getHeader("X-User-UUID");
+        return ResponseEntity.ok(ApiResponse.success("Seller details submitted successfully",
+                userService.submitSellerDetails(userUuid, body)));
+    }
+
+    /** Seller views their own submitted details. */
+    @PreAuthorize("hasRole('SELLER')")
+    @GetMapping("/me/seller-details")
+    public ResponseEntity<ApiResponse<SellerDetailResponse>> getSellerDetails(HttpServletRequest request) {
+        String userUuid = request.getHeader("X-User-UUID");
+        return ResponseEntity.ok(ApiResponse.success("Seller details fetched successfully",
+                userService.getSellerDetails(userUuid)));
+    }
+
+    // ─────────────────────────────────────────────
     // ADMIN ROUTES
     // ─────────────────────────────────────────────
+
+    /** Admin views a seller's verification details before approving. */
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/admin/seller-details/{uuid}")
+    public ResponseEntity<ApiResponse<SellerDetailResponse>> getSellerDetailsByAdmin(@PathVariable String uuid) {
+        return ResponseEntity.ok(ApiResponse.success("Seller details fetched successfully",
+                userService.getSellerDetailsByAdmin(uuid)));
+    }
 
     @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/admin/approve/{uuid}")

@@ -1,17 +1,20 @@
 package com.sourabh.payment_service.service.impl;
 
 import com.sourabh.payment_service.common.PageResponse;
-import com.sourabh.payment_service.dto.PaymentRequest;
-import com.sourabh.payment_service.dto.PaymentResponse;
+import com.sourabh.payment_service.dto.*;
 import com.sourabh.payment_service.entity.Payment;
+import com.sourabh.payment_service.entity.PaymentSplit;
+import com.sourabh.payment_service.entity.PaymentSplitStatus;
 import com.sourabh.payment_service.entity.PaymentStatus;
 import com.sourabh.payment_service.exception.PaymentAccessException;
 import com.sourabh.payment_service.exception.PaymentNotFoundException;
 import com.sourabh.payment_service.kafka.event.PaymentCompletedEvent;
 import com.sourabh.payment_service.repository.PaymentRepository;
+import com.sourabh.payment_service.repository.PaymentSplitRepository;
 import com.sourabh.payment_service.service.PaymentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -31,7 +34,16 @@ import java.util.UUID;
 public class PaymentServiceImpl implements PaymentService {
 
     private final PaymentRepository paymentRepository;
+    private final PaymentSplitRepository paymentSplitRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    /** Platform commission percentage — configurable via application.properties */
+    @Value("${payment.platform-fee-percent:10.0}")
+    private double platformFeePercent;
+
+    /** Flat delivery fee per item — configurable via application.properties */
+    @Value("${payment.delivery-fee-per-item:30.0}")
+    private double deliveryFeePerItem;
 
     private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
 
@@ -61,8 +73,8 @@ public class PaymentServiceImpl implements PaymentService {
 
         paymentRepository.save(payment);
 
-        // Simulate payment gateway (80% success)
-        boolean success = Math.random() > 0.2;
+        // Simulate payment gateway (100% success for demo)
+        boolean success = true; // Changed from Math.random() > 0.2 for reliable demo
         PaymentStatus finalStatus = success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
         payment.setStatus(finalStatus);
         paymentRepository.save(payment);
@@ -130,6 +142,68 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     // ─────────────────────────────────────────────
+    // SELLER: paginated payment splits
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<PaymentSplitResponse> getSellerPayments(String sellerUuid, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<PaymentSplit> splitPage = paymentSplitRepository.findBySellerUuid(sellerUuid, pageable);
+
+        List<PaymentSplitResponse> content = splitPage.getContent()
+                .stream()
+                .map(this::mapSplitToResponse)
+                .toList();
+
+        return PageResponse.<PaymentSplitResponse>builder()
+                .content(content)
+                .page(splitPage.getNumber())
+                .size(splitPage.getSize())
+                .totalElements(splitPage.getTotalElements())
+                .totalPages(splitPage.getTotalPages())
+                .last(splitPage.isLast())
+                .build();
+    }
+
+    // ─────────────────────────────────────────────
+    // SELLER DASHBOARD
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public SellerDashboardResponse getSellerDashboard(String sellerUuid) {
+        Double completed = paymentSplitRepository.sumSellerPayout(sellerUuid);
+        Double pending = paymentSplitRepository.sumSellerPendingPayout(sellerUuid);
+        Long totalOrders = paymentSplitRepository.countSellerOrders(sellerUuid);
+
+        return SellerDashboardResponse.builder()
+                .sellerUuid(sellerUuid)
+                .totalEarnings(completed + pending)
+                .completedPayouts(completed)
+                .pendingPayouts(pending)
+                .totalOrders(totalOrders)
+                .build();
+    }
+
+    // ─────────────────────────────────────────────
+    // ADMIN DASHBOARD
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public AdminDashboardResponse getAdminDashboard() {
+        return AdminDashboardResponse.builder()
+                .totalGrossRevenue(paymentSplitRepository.sumTotalItemAmount())
+                .totalPlatformEarnings(paymentSplitRepository.sumTotalPlatformFees())
+                .totalDeliveryFees(paymentSplitRepository.sumTotalDeliveryFees())
+                .totalSellerPayouts(paymentSplitRepository.sumTotalSellerPayouts())
+                .totalCompletedOrders(paymentSplitRepository.countTotalCompletedOrders())
+                .activeSellers(paymentSplitRepository.countActiveSellers())
+                .build();
+    }
+
+    // ─────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────
 
@@ -141,13 +215,32 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     private PaymentResponse mapToResponse(Payment payment) {
+        List<PaymentSplitResponse> splits = paymentSplitRepository.findByPaymentUuid(payment.getUuid())
+                .stream()
+                .map(this::mapSplitToResponse)
+                .toList();
+
         return PaymentResponse.builder()
                 .uuid(payment.getUuid())
                 .orderUuid(payment.getOrderUuid())
                 .buyerUuid(payment.getBuyerUuid())
                 .amount(payment.getAmount())
                 .status(payment.getStatus().name())
+                .splits(splits)
                 .createdAt(payment.getCreatedAt())
+                .build();
+    }
+
+    private PaymentSplitResponse mapSplitToResponse(PaymentSplit split) {
+        return PaymentSplitResponse.builder()
+                .sellerUuid(split.getSellerUuid())
+                .productUuid(split.getProductUuid())
+                .itemAmount(split.getItemAmount())
+                .platformFeePercent(split.getPlatformFeePercent())
+                .platformFee(split.getPlatformFee())
+                .deliveryFee(split.getDeliveryFee())
+                .sellerPayout(split.getSellerPayout())
+                .status(split.getStatus().name())
                 .build();
     }
 }

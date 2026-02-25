@@ -24,7 +24,6 @@ public class UpdateProductRequest {
 
     private String category;
 
-    @Size(max = 1000)
     private String imageUrl;
 }
 

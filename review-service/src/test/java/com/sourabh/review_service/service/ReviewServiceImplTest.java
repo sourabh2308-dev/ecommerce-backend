@@ -298,7 +298,7 @@ class ReviewServiceImplTest {
     @Test
     @DisplayName("getReviewsByProduct: returns empty page for unknown product")
     void getReviewsByProduct_unknownProduct_empty() {
-        var emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        var emptyPage = new PageImpl<Review>(List.of(), PageRequest.of(0, 10), 0);
         when(reviewRepository.findByProductUuid(eq("unknown-prod"), any())).thenReturn(emptyPage);
 
         PageResponse<ReviewResponse> response = reviewService.getReviewsByProduct("unknown-prod", 0, 10);
@@ -319,7 +319,7 @@ class ReviewServiceImplTest {
     @Test
     @DisplayName("getMyReviews: returns empty page when buyer has no reviews")
     void getMyReviews_noReviews() {
-        var emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        var emptyPage = new PageImpl<Review>(List.of(), PageRequest.of(0, 10), 0);
         when(reviewRepository.findByBuyerUuid(eq("buyer-uuid"), any())).thenReturn(emptyPage);
 
         PageResponse<ReviewResponse> response = reviewService.getMyReviews("buyer-uuid", 0, 10);

@@ -1,11 +1,9 @@
 package com.sourabh.user_service.service.impl;
 
 import com.sourabh.user_service.common.PageResponse;
-import com.sourabh.user_service.dto.request.ChangePasswordRequest;
-import com.sourabh.user_service.dto.request.RegisterRequest;
-import com.sourabh.user_service.dto.request.UpdateProfileRequest;
-import com.sourabh.user_service.dto.request.VerifyOTPRequest;
+import com.sourabh.user_service.dto.request.*;
 import com.sourabh.user_service.dto.response.InternalUserDto;
+import com.sourabh.user_service.dto.response.SellerDetailResponse;
 import com.sourabh.user_service.dto.response.UserResponse;
 import com.sourabh.user_service.entity.*;
 import com.sourabh.user_service.exception.OTPException;
@@ -13,6 +11,7 @@ import com.sourabh.user_service.exception.UserStateException;
 import com.sourabh.user_service.exception.UserAlreadyExistsException;
 import com.sourabh.user_service.exception.UserNotFoundException;
 import com.sourabh.user_service.repository.OTPVerificationRepository;
+import com.sourabh.user_service.repository.SellerDetailRepository;
 import com.sourabh.user_service.repository.UserRepository;
 import com.sourabh.user_service.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +38,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final OTPVerificationRepository otpRepository;
+    private final SellerDetailRepository sellerDetailRepository;
     private final PasswordEncoder passwordEncoder;
 
 
@@ -109,7 +109,7 @@ public class UserServiceImpl implements UserService {
         user.setEmailVerified(true);
 
         if (user.getRole() == Role.SELLER) {
-            user.setStatus(UserStatus.PENDING_APPROVAL);
+            user.setStatus(UserStatus.PENDING_DETAILS);
         } else {
             user.setStatus(UserStatus.ACTIVE);
         }
@@ -155,6 +155,113 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
+    // ─── SELLER DETAIL METHODS ───
+
+    @Override
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "usersByEmail", allEntries = true)
+    })
+    public SellerDetailResponse submitSellerDetails(String userUuid, SellerDetailRequest request) {
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (user.getRole() != Role.SELLER) {
+            throw new UserStateException("Only sellers can submit verification details");
+        }
+
+        if (user.getStatus() != UserStatus.PENDING_DETAILS) {
+            throw new UserStateException("Seller is not in the details submission stage. Current status: " + user.getStatus());
+        }
+
+        // Check if details already submitted
+        if (sellerDetailRepository.existsByUser(user)) {
+            throw new UserStateException("Seller details already submitted");
+        }
+
+        SellerDetail detail = SellerDetail.builder()
+                .user(user)
+                .businessName(request.getBusinessName())
+                .businessType(request.getBusinessType())
+                .gstNumber(request.getGstNumber())
+                .panNumber(request.getPanNumber())
+                .addressLine1(request.getAddressLine1())
+                .addressLine2(request.getAddressLine2())
+                .city(request.getCity())
+                .state(request.getState())
+                .pincode(request.getPincode())
+                .idType(request.getIdType())
+                .idNumber(request.getIdNumber())
+                .bankAccountNumber(request.getBankAccountNumber())
+                .bankIfscCode(request.getBankIfscCode())
+                .bankName(request.getBankName())
+                .submittedAt(LocalDateTime.now())
+                .build();
+
+        sellerDetailRepository.save(detail);
+
+        // Move seller to PENDING_APPROVAL
+        user.setStatus(UserStatus.PENDING_APPROVAL);
+        userRepository.save(user);
+
+        log.info("Seller details submitted: uuid={}, business={}", userUuid, request.getBusinessName());
+        return mapSellerDetailToResponse(detail);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SellerDetailResponse getSellerDetails(String userUuid) {
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (user.getRole() != Role.SELLER) {
+            throw new UserStateException("Only sellers have verification details");
+        }
+
+        SellerDetail detail = sellerDetailRepository.findByUser(user)
+                .orElseThrow(() -> new UserNotFoundException("Seller details not yet submitted"));
+
+        return mapSellerDetailToResponse(detail);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SellerDetailResponse getSellerDetailsByAdmin(String sellerUuid) {
+        User user = userRepository.findByUuid(sellerUuid)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (user.getRole() != Role.SELLER) {
+            throw new UserStateException("User is not a seller");
+        }
+
+        SellerDetail detail = sellerDetailRepository.findByUser(user)
+                .orElseThrow(() -> new UserNotFoundException("Seller has not submitted verification details"));
+
+        return mapSellerDetailToResponse(detail);
+    }
+
+    private SellerDetailResponse mapSellerDetailToResponse(SellerDetail detail) {
+        return SellerDetailResponse.builder()
+                .businessName(detail.getBusinessName())
+                .businessType(detail.getBusinessType())
+                .gstNumber(detail.getGstNumber())
+                .panNumber(detail.getPanNumber())
+                .addressLine1(detail.getAddressLine1())
+                .addressLine2(detail.getAddressLine2())
+                .city(detail.getCity())
+                .state(detail.getState())
+                .pincode(detail.getPincode())
+                .idType(detail.getIdType())
+                .idNumber(detail.getIdNumber())
+                .bankAccountNumber(detail.getBankAccountNumber())
+                .bankIfscCode(detail.getBankIfscCode())
+                .bankName(detail.getBankName())
+                .submittedAt(detail.getSubmittedAt())
+                .verifiedAt(detail.getVerifiedAt())
+                .build();
+    }
+
     @Override
     @Transactional
     @Caching(evict = {
@@ -178,10 +285,19 @@ public class UserServiceImpl implements UserService {
             throw new UserStateException("Seller is not pending approval");
         }
 
-
+        // Verify seller has submitted business/ID details
+        if (!sellerDetailRepository.existsByUser(user)) {
+            throw new UserStateException("Seller has not submitted verification details");
+        }
 
         user.setStatus(UserStatus.ACTIVE);
         user.setApproved(true);
+
+        // Mark seller details as verified
+        sellerDetailRepository.findByUser(user).ifPresent(detail -> {
+            detail.setVerifiedAt(LocalDateTime.now());
+            sellerDetailRepository.save(detail);
+        });
 
         userRepository.save(user);
 
@@ -320,9 +436,13 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         user.setDeleted(false);
-        // Sellers need re-approval after being restored; buyers/admins go straight to ACTIVE
+        // Sellers need re-approval after being restored; check if they submitted details
         if (user.getRole() == Role.SELLER && !user.isApproved()) {
-            user.setStatus(UserStatus.PENDING_APPROVAL);
+            if (sellerDetailRepository.existsByUser(user)) {
+                user.setStatus(UserStatus.PENDING_APPROVAL);
+            } else {
+                user.setStatus(UserStatus.PENDING_DETAILS);
+            }
         } else {
             user.setStatus(UserStatus.ACTIVE);
         }
@@ -488,7 +608,11 @@ public class UserServiceImpl implements UserService {
 
         // Sellers who were blocked need re-approval unless already approved
         if (user.getRole() == Role.SELLER && !user.isApproved()) {
-            user.setStatus(UserStatus.PENDING_APPROVAL);
+            if (sellerDetailRepository.existsByUser(user)) {
+                user.setStatus(UserStatus.PENDING_APPROVAL);
+            } else {
+                user.setStatus(UserStatus.PENDING_DETAILS);
+            }
         } else {
             user.setStatus(UserStatus.ACTIVE);
         }

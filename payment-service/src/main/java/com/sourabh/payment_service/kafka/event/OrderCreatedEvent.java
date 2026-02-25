@@ -4,9 +4,12 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Event published by order-service when a new order is placed.
  * Payment-service consumes this to trigger automatic payment processing.
+ * Now supports multi-item orders with per-seller breakdown.
  */
 @Data
 @NoArgsConstructor
@@ -16,7 +19,6 @@ public class OrderCreatedEvent {
     private String eventId;
     private String orderUuid;
     private String buyerUuid;
-    private String productUuid;
-    private int quantity;
+    private List<OrderItemEvent> items;
     private double totalAmount;
 }

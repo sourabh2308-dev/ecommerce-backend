@@ -50,7 +50,7 @@ public class Product extends BaseAuditEntity {
     @Builder.Default
     private Integer totalReviews = 0;
 
-    @Column(length = 1000)
+    @Column(columnDefinition = "TEXT")
     private String imageUrl;
 
 }
