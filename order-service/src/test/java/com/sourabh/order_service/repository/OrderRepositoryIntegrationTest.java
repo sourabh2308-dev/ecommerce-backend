@@ -68,7 +68,7 @@ class OrderRepositoryIntegrationTest {
                 .paymentStatus(PaymentStatus.PENDING)
                 .isDeleted(false)
                 .build();
-        order2.setItems(List.of());
+        order2.setItems(new java.util.ArrayList<>());
 
         Order deletedOrder = Order.builder()
                 .uuid("order-deleted")
@@ -78,7 +78,7 @@ class OrderRepositoryIntegrationTest {
                 .paymentStatus(PaymentStatus.FAILED)
                 .isDeleted(true)
                 .build();
-        deletedOrder.setItems(List.of());
+        deletedOrder.setItems(new java.util.ArrayList<>());
 
         orderRepository.saveAll(List.of(order1, order2, deletedOrder));
     }

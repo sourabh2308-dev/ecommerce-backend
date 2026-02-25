@@ -85,6 +85,10 @@ public class OrderServiceImpl implements OrderService {
      */
     public OrderResponse createOrder(CreateOrderRequest request, String role, String buyerUuid) {
 
+        if (request.getItems() == null || request.getItems().isEmpty()) {
+            throw new OrderStateException("Order must contain at least one item");
+        }
+
         if (!"BUYER".equalsIgnoreCase(role)) {
             throw new OrderAccessException("Only buyers can place orders");
         }
