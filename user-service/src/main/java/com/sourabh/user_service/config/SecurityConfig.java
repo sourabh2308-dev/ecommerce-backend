@@ -20,6 +20,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * {@link HeaderRoleAuthenticationFilter} to populate the Spring Security context,
  * enabling {@code @PreAuthorize} evaluation on controller methods.
  */
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableMethodSecurity
 @RequiredArgsConstructor

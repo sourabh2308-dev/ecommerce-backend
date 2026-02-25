@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.Optional;
 
+// Data Repository - Provides database access via Spring Data JPA
 public interface ProductRepository
         extends JpaRepository<Product, Long>,
         JpaSpecificationExecutor<Product> {

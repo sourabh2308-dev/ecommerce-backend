@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
  * BASE PATH: /api/order
  * Auth: JWT validation at API Gateway + role-based @PreAuthorize on methods
  */
+// REST API Controller - Handles HTTP requests and responses
 @RestController
 @RequestMapping("/api/order")
 @RequiredArgsConstructor

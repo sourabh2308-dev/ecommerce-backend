@@ -23,6 +23,7 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
  *     that bypass the gateway entirely.
  */
 @Slf4j
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @RequiredArgsConstructor
 public class InternalSecretFilterConfig {

@@ -13,6 +13,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * covered by InternalSecretFilter (a servlet filter that runs before Spring
  * Security and applies to all request paths).
  */
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @RequiredArgsConstructor
 public class WebConfig implements WebMvcConfigurer {

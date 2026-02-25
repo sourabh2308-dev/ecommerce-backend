@@ -67,6 +67,7 @@ import org.springframework.web.bind.annotation.*;
  * 
  * ═══════════════════════════════════════════════════════════════════════════
  */
+// REST API Controller - Handles HTTP requests and responses
 @RestController                        // Marks this as REST API controller with JSON responses
 @RequestMapping("/api/auth")          // Base path for all endpoints
 @RequiredArgsConstructor              // Lombok: generates constructor for dependency injection

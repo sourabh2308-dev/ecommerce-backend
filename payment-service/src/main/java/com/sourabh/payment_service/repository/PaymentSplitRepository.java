@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
+// Data Repository - Provides database access via Spring Data JPA
 public interface PaymentSplitRepository extends JpaRepository<PaymentSplit, Long> {
 
     List<PaymentSplit> findByPaymentUuid(String paymentUuid);

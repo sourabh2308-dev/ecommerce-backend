@@ -20,6 +20,7 @@ import java.util.List;
  * method-level annotations can be evaluated.
  */
 @Component
+// HTTP Filter - Intercepts requests for cross-cutting concerns
 public class HeaderRoleAuthenticationFilter extends OncePerRequestFilter {
 
     @Override

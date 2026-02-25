@@ -12,6 +12,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 @Component
+// HTTP Filter - Intercepts requests for cross-cutting concerns
 public class InternalSecretFilter extends OncePerRequestFilter {
 
     @Value("${internal.secret}")

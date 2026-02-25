@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
+// Data Repository - Provides database access via Spring Data JPA
 public interface PaymentRepository
         extends JpaRepository<Payment, Long> {
 

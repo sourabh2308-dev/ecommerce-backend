@@ -27,6 +27,7 @@ import java.util.UUID;
  */
 @Component
 @Slf4j
+// HTTP Filter - Intercepts requests for cross-cutting concerns
 public class CorrelationIdGlobalFilter implements GlobalFilter, Ordered {
 
     public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";

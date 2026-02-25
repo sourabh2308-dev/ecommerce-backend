@@ -16,6 +16,7 @@ import org.springframework.security.web.server.authentication.AuthenticationWebF
  * JWT is validated HERE only — downstream services never see raw JWTs.
  * Public paths are whitelisted; everything else requires a valid Bearer token.
  */
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableWebFluxSecurity
 @RequiredArgsConstructor

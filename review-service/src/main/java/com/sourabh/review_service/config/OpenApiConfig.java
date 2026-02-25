@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
 
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 public class OpenApiConfig {
 

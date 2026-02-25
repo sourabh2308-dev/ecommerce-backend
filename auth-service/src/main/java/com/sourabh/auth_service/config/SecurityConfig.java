@@ -22,6 +22,7 @@ import org.springframework.security.web.SecurityFilterChain;
  *
  * @EnableMethodSecurity enables @PreAuthorize annotations on controller methods.
  */
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {

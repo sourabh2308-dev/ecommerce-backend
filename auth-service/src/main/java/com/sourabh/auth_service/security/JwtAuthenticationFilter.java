@@ -20,6 +20,7 @@ import java.util.Collections;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+// HTTP Filter - Intercepts requests for cross-cutting concerns
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;

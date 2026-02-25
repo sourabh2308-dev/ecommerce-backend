@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
  * automatically when {@code @EnableJpaAuditing} is present on the main class.
  */
 @MappedSuperclass
+// JPA Entity - Domain model persisted in database
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter

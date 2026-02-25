@@ -48,6 +48,7 @@ import java.util.UUID;
  * COMPENSATION:
  * If payment fails, cancels order and restores product stock via productServiceClient
  */
+// Service Implementation - Contains business logic and data operations
 @Service
 @RequiredArgsConstructor
 @Slf4j

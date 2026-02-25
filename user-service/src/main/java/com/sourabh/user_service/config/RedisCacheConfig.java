@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableCaching
 public class RedisCacheConfig {

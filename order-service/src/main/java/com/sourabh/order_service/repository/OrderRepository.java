@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 
+// Data Repository - Provides database access via Spring Data JPA
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findByUuidAndIsDeletedFalse(String uuid);

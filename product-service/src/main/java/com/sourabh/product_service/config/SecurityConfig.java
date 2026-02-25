@@ -18,6 +18,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * headers set by the gateway and uses them to populate the Spring Security
  * context for {@code @PreAuthorize} evaluation.
  */
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableMethodSecurity
 @RequiredArgsConstructor

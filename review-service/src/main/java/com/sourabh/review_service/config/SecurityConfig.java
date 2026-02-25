@@ -14,6 +14,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * JWT validation happens at the API Gateway; this service trusts the
  * forwarded {@code X-User-Role} header for method-level RBAC via {@code @PreAuthorize}.
  */
+// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableMethodSecurity
 @RequiredArgsConstructor

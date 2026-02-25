@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 @Slf4j
+// HTTP Filter - Intercepts requests for cross-cutting concerns
 public class RateLimitGlobalFilter implements GlobalFilter, Ordered {
 
     private static final int REQUEST_LIMIT = 100;
