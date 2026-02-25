@@ -1,5 +1,14 @@
 package com.sourabh.user_service.util;
 
+/**
+ * UTILITY CLASS - Helper Functions
+ * 
+ * Provides reusable helper methods for:
+ *   - Token generation and validation (JWT utils)
+ *   - Date/time conversions
+ *   - Data transformations
+ *   - Common business calculations
+ */
 public class EnumUtil {
 
     public static <T extends Enum<T>> T parseEnum(

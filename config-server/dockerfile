@@ -1,7 +1,28 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCKERFILE FOR CONFIG-SERVER (Spring Cloud Config)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# PURPOSE:
+# Centralized configuration management for all microservices.
+# Config Server stores application properties and serves them to services at startup.
+#
+# WHY CONFIG-SERVER:
+# - Single source of truth for all service configurations
+# - Environment-specific configs (dev, staging, prod) without rebuilding images
+# - Dynamic property refresh without service restart
+# - Version control for configuration (Git-backed)
+# - Encryption for sensitive data (passwords, API keys)
+#
+# PORT: 8888 (standard Spring Cloud Config Server port)
+# ALL services connect to config-server before starting to fetch their properties.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ---- Build stage ----
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 WORKDIR /workspace
 
+# Copy POMs for multi-module Maven project
 COPY pom.xml .
 COPY api-gateway/pom.xml api-gateway/
 COPY auth-service/pom.xml auth-service/
@@ -12,14 +33,24 @@ COPY review-service/pom.xml review-service/
 COPY payment-service/pom.xml payment-service/
 COPY eureka-server/pom.xml eureka-server/
 COPY config-server/pom.xml config-server/
+
+# Download dependencies (cached layer)
 RUN mvn -pl config-server dependency:go-offline -B --no-transfer-progress || true
 
+# Copy source code and build
 COPY config-server/src config-server/src
 RUN mvn -pl config-server package -DskipTests -B --no-transfer-progress
 
 # ---- Runtime stage ----
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
+
+# Copy the built JAR file from build stage
 COPY --from=builder /workspace/config-server/target/*.jar app.jar
+
+# Expose config-server port (8888 is Spring Cloud Config default)
 EXPOSE 8888
+
+# Start the Config Server
+# All services will connect to http://config-server:8888 to fetch their configs
 ENTRYPOINT ["java", "-jar", "app.jar"]

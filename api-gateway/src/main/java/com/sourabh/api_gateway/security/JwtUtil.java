@@ -8,6 +8,15 @@ import org.springframework.stereotype.Component;
 import java.security.Key;
 
 @Component
+/**
+ * UTILITY CLASS - Helper Functions
+ * 
+ * Provides reusable helper methods for:
+ *   - Token generation and validation (JWT utils)
+ *   - Date/time conversions
+ *   - Data transformations
+ *   - Common business calculations
+ */
 public class JwtUtil {
 
     private final Key signingKey;

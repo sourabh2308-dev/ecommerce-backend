@@ -13,9 +13,24 @@ import java.io.IOException;
 
 @Component
 // HTTP Filter - Intercepts requests for cross-cutting concerns
+/**
+ * HTTP FILTER - Request/Response Interceptor
+ * 
+ * Intercepts every HTTP request/response for cross-cutting concerns:
+ *   - JWT validation
+ *   - Header injection
+ *   - Request/response logging
+ *   - Rate limiting
+ * 
+ * Executes before controller and after response generation.
+ */
 public class InternalSecretFilter extends OncePerRequestFilter {
 
     @Value("${internal.secret}")
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
     private String internalSecret;
 
     @Override

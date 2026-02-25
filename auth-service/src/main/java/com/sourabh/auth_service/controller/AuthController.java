@@ -134,7 +134,77 @@ public class AuthController {
      *   - Uses Jackson to deserialize JSON to LoginRequest object
      *   - Automatically handles Content-Type: application/json
      */
+    /**
+
+     * API ENDPOINT
+
+     * 
+
+     * HTTP Method: POST
+
+     * 
+
+     * PURPOSE:
+
+     * Handles HTTP requests for this endpoint. Validates input, delegates to service
+
+     * layer for business logic, and returns JSON response.
+
+     * 
+
+     * PROCESS FLOW:
+
+     * 1. API Gateway forwards request after JWT validation
+
+     * 2. Spring deserializes JSON to request object
+
+     * 3. @Valid triggers bean validation (if present)
+
+     * 4. @PreAuthorize checks user role (if present)
+
+     * 5. Service layer executes business logic
+
+     * 6. Response object serialized to JSON
+
+     * 7. HTTP status code sent (200/201/400/403/404/500)
+
+     * 
+
+     * SECURITY:
+
+     * - JWT validation at API Gateway (user authenticated)
+
+     * - Role-based access via @PreAuthorize annotation
+
+     * - Input validation via @Valid and constraint annotations
+
+     * 
+
+     * ERROR HANDLING:
+
+     * - Service exceptions caught by GlobalExceptionHandler
+
+     * - Returns standardized error response with HTTP status
+
+     */
+
     @PostMapping("/login")
+    /**
+     * LOGIN - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the login operation.
+     *
+     * PARAMETERS:
+     * @param request - @Valid @RequestBody LoginRequest value
+     *
+     * RETURN VALUE:
+     * @return ResponseEntity<AuthResponse> - Result of the operation
+     *
+     * ANNOTATIONS USED:
+     * @PostMapping - REST endpoint handler
+     *
+     */
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         // Delegate to service layer for business logic
         // ResponseEntity.ok() creates 200 OK response with body
@@ -189,6 +259,24 @@ public class AuthController {
      *   - Can make optional: @RequestParam(required = false)
      */
     @PostMapping("/refresh")
+    /**
+     * REFRESH - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the refresh operation.
+     *
+     * PARAMETERS:
+     * @param refreshToken - @RequestParam String value
+     *
+     * RETURN VALUE:
+     * @return ResponseEntity<AuthResponse> - Result of the operation
+     *
+     * ANNOTATIONS USED:
+     * @RequestParam - Applied to this method
+     * @RequestParam - Applied to this method
+     * @PostMapping - REST endpoint handler
+     *
+     */
     public ResponseEntity<AuthResponse> refresh(@RequestParam String refreshToken) {
         // Token rotation: old token revoked, new pair issued
         return ResponseEntity.ok(authService.refreshToken(refreshToken));
@@ -233,6 +321,22 @@ public class AuthController {
      *   - Alternative to ok() when no data needs to be returned
      */
     @PostMapping("/logout")
+    /**
+     * LOGOUT - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the logout operation.
+     *
+     * PARAMETERS:
+     * @param refreshToken - @RequestParam String value
+     *
+     * RETURN VALUE:
+     * @return ResponseEntity<Void> - Result of the operation
+     *
+     * ANNOTATIONS USED:
+     * @PostMapping - REST endpoint handler
+     *
+     */
     public ResponseEntity<Void> logout(@RequestParam String refreshToken) {
         // Revoke refresh token to prevent further use
         authService.logout(refreshToken);

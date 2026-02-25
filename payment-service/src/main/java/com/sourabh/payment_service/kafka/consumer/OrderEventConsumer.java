@@ -39,9 +39,17 @@ public class OrderEventConsumer {
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
     @Value("${payment.platform-fee-percent:10.0}")
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
     private double platformFeePercent;
 
     @Value("${payment.delivery-fee-per-item:30.0}")
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
     private double deliveryFeePerItem;
 
     private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
@@ -54,8 +62,79 @@ public class OrderEventConsumer {
             dltTopicSuffix = ".DLT",
             autoCreateTopics = "true"
     )
+    /**
+
+     * KAFKA EVENT CONSUMER - Async Event Processing
+
+     * 
+
+     * PURPOSE:
+
+     * Subscribes to Kafka topic and processes events asynchronously.
+
+     * Part of event-driven architecture for inter-service communication.
+
+     * 
+
+     * HOW IT WORKS:
+
+     * 1. Spring Kafka polls topic for new messages
+
+     * 2. Deserializes JSON to event object
+
+     * 3. Invokes this method in consumer thread pool
+
+     * 4. Acknowledges message on successful processing
+
+     * 5. On exception, retries or sends to DLQ (Dead Letter Queue)
+
+     * 
+
+     * @KafkaListener annotation parameters:
+
+     * - topics: Topic name(s) to subscribe to
+
+     * - groupId: Consumer group (enables load balancing)
+
+     * - containerFactory: Custom config for concurrency, error handling
+
+     * 
+
+     * EVENTUAL CONSISTENCY:
+
+     * Kafka ensures at-least-once delivery. Method must be idempotent
+
+     * (safe to process same event multiple times).
+
+     * 
+
+     * ERROR HANDLING:
+
+     * - Exceptions trigger retry mechanism (configurable retry count)
+
+     * - Failed messages after retries sent to DLQ topic
+
+     * - Use @Transactional to rollback DB changes on error
+
+     */
+
     @KafkaListener(topics = TOPIC_ORDER_CREATED, groupId = "payment-service")
     @Transactional
+    /**
+     * HANDLEORDERCREATED - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the handleOrderCreated operation.
+     *
+     * PARAMETERS:
+     * @param event - OrderCreatedEvent value
+     *
+     * ANNOTATIONS USED:
+     * @Transactional - Wraps in database transaction (atomic execution)
+     * @KafkaListener - Consumes events from Kafka topic
+     * @Transactional - Wraps in database transaction (atomic execution)
+     *
+     */
     public void handleOrderCreated(OrderCreatedEvent event) {
         log.info("Received OrderCreatedEvent: eventId={}, orderUuid={}, items={}",
                 event.getEventId(), event.getOrderUuid(),

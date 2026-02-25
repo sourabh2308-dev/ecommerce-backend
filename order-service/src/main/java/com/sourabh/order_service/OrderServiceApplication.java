@@ -8,8 +8,31 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 @SpringBootApplication
 @EnableJpaAuditing
 @EnableFeignClients
+/**
+ * MAIN APPLICATION ENTRY POINT
+ * 
+ * This is the Spring Boot application entry point for this microservice.
+ * Enables component scanning, sets up Spring contexts, and initializes all beans.
+ */
 public class OrderServiceApplication {
 
+    /**
+     * MAIN - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the main operation.
+     *
+     * PARAMETERS:
+     * @param args - String[] value
+     *
+     * RETURN VALUE:
+     * @return static void - Result of the operation
+     *
+     * ANNOTATIONS USED:
+     * @EnableJpaAuditing - Applied to this method
+     * @EnableFeignClients - Applied to this method
+     *
+     */
     public static void main(String[] args) {
         SpringApplication.run(OrderServiceApplication.class, args);
     }

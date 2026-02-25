@@ -13,7 +13,13 @@ import lombok.*;
 public class OrderItem {
 
     @Id
+    // Database column mapping
+    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    // Database column mapping
+    // @GeneratedValue - JPA persistence configuration
+    // Database column mapping
+    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
     private String productUuid;
@@ -25,6 +31,10 @@ public class OrderItem {
     private Integer quantity;
 
     @ManyToOne
+    // @ManyToOne applied to field below
+    // @ManyToOne applied to field below
     @JoinColumn(name = "order_id")
+    // @JoinColumn applied to field below
+    // @JoinColumn applied to field below
     private Order order;
 }

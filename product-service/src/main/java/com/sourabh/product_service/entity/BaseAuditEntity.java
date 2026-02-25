@@ -24,6 +24,32 @@ import java.time.LocalDateTime;
 public abstract class BaseAuditEntity {
 
     @CreatedDate
+    /**
+
+     * DATABASE COLUMN MAPPING
+
+     * 
+
+     * @Column configures how this field maps to database column:
+
+     * - name: Actual column name in table (default: field name in snake_case)
+
+     * - nullable: Can be NULL in database (default: true)
+
+     * - unique: Enforces uniqueness constraint (default: false)
+
+     * - length: Max length for VARCHAR columns (default: 255)
+
+     * - updatable: Can be modified after insert (default: true)
+
+     * - insertable: Included in INSERT statements (default: true)
+
+     * 
+
+     * JPA auto-generates SQL schema based on these annotations.
+
+     */
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 

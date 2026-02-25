@@ -69,6 +69,60 @@ public class OrderController {
      * Response: PageResponse with orders, pagination metadata
      * Sorting: By createdAt DESC (newest first)
      */
+    /**
+
+     * API ENDPOINT
+
+     * 
+
+     * HTTP Method: GET
+
+     * 
+
+     * PURPOSE:
+
+     * Handles HTTP requests for this endpoint. Validates input, delegates to service
+
+     * layer for business logic, and returns JSON response.
+
+     * 
+
+     * PROCESS FLOW:
+
+     * 1. API Gateway forwards request after JWT validation
+
+     * 2. Spring deserializes JSON to request object
+
+     * 3. @Valid triggers bean validation (if present)
+
+     * 4. @PreAuthorize checks user role (if present)
+
+     * 5. Service layer executes business logic
+
+     * 6. Response object serialized to JSON
+
+     * 7. HTTP status code sent (200/201/400/403/404/500)
+
+     * 
+
+     * SECURITY:
+
+     * - JWT validation at API Gateway (user authenticated)
+
+     * - Role-based access via @PreAuthorize annotation
+
+     * - Input validation via @Valid and constraint annotations
+
+     * 
+
+     * ERROR HANDLING:
+
+     * - Service exceptions caught by GlobalExceptionHandler
+
+     * - Returns standardized error response with HTTP status
+
+     */
+
     @GetMapping
     public ResponseEntity<PageResponse<OrderResponse>> listOrders(
             @RequestParam(defaultValue = "0") int page,

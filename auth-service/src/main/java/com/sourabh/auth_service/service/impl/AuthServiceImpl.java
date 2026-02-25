@@ -197,6 +197,10 @@ public class AuthServiceImpl implements AuthService {
      * Used to calculate expiry date when creating new refresh tokens.
  */
     @Value("${jwt.refresh-token-expiration}")
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
     private long refreshTokenExpiration;
 
     /**
@@ -206,6 +210,10 @@ public class AuthServiceImpl implements AuthService {
      * Prevents external clients from directly calling internal endpoints.
      */
     @Value("${internal.secret}")
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
+    // Dependency injected by Spring container
+    // @Value - Automatic dependency injection at runtime
     private String internalSecret;
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -265,6 +273,26 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     @Transactional  // Ensures atomic token creation (rollback on failure)
+    /**
+     * LOGIN - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the login operation.
+     *
+     * PARAMETERS:
+     * @param request - LoginRequest value
+     *
+     * RETURN VALUE:
+     * @return AuthResponse - Result of the operation
+     *
+     * ANNOTATIONS USED:
+     * @return - Applied to this method
+     * @throws - Applied to this method
+     * @throws - Applied to this method
+     * @Override - Implements interface method
+     * @Transactional - Wraps in database transaction (atomic execution)
+     *
+     */
     public AuthResponse login(LoginRequest request) {
         // Log login attempt (email only, never log passwords)
         log.info("Login attempt for email: {}", request.getEmail());
@@ -347,6 +375,26 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     @Transactional  // Atomic token rotation (revoke old + create new)
+    /**
+     * REFRESHTOKEN - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the refreshToken operation.
+     *
+     * PARAMETERS:
+     * @param refreshTokenValue - String value
+     *
+     * RETURN VALUE:
+     * @return AuthResponse - Result of the operation
+     *
+     * ANNOTATIONS USED:
+     * @throws - Applied to this method
+     * @throws - Applied to this method
+     * @throws - Applied to this method
+     * @Override - Implements interface method
+     * @Transactional - Wraps in database transaction (atomic execution)
+     *
+     */
     public AuthResponse refreshToken(String refreshTokenValue) {
         // Step 1: Find refresh token in database
         RefreshToken refreshToken = refreshTokenRepository.findByToken(refreshTokenValue)
@@ -604,6 +652,23 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     @Transactional  // Atomic revocation operation
+    /**
+     * LOGOUT - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the logout operation.
+     *
+     * PARAMETERS:
+     * @param refreshTokenValue - String value
+     *
+     * ANNOTATIONS USED:
+     * @Transactional - Wraps in database transaction (atomic execution)
+     * @param - Applied to this method
+     * @throws - Applied to this method
+     * @Override - Implements interface method
+     * @Transactional - Wraps in database transaction (atomic execution)
+     *
+     */
     public void logout(String refreshTokenValue) {
         // Step 1: Find refresh token in database
         RefreshToken refreshToken = refreshTokenRepository.findByToken(refreshTokenValue)

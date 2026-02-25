@@ -1,7 +1,34 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# DOCKERFILE FOR EUREKA-SERVER (Service Discovery)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# PURPOSE:
+# Service registry and discovery for microservices architecture.
+# Eureka Server maintains a registry of all running service instances.
+#
+# WHY EUREKA:
+# - Dynamic service discovery (no hardcoded IP addresses)
+# - Load balancing across multiple instances (Ribbon/Spring Cloud LoadBalancer)
+# - Health monitoring (heartbeat mechanism)
+# - Fault tolerance (self-healing, peer replication)
+# - Zero-downtime deployments (register new instances before removing old)
+#
+# HOW IT WORKS:
+# 1. Services register themselves on startup (eureka.client.register-with-eureka=true)
+# 2. Services send heartbeat every 30 seconds (default)
+# 3. Other services query Eureka to find instances (e.g., @FeignClient resolves service names)
+# 4. If service stops heartbeat, Eureka evicts it after 90 seconds
+#
+# PORT: 8761 (standard Eureka Server port)
+# Dashboard: http://localhost:8761 (view all registered services and their status)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ---- Build stage ----
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 WORKDIR /workspace
 
+# Copy POMs for multi-module Maven project
 COPY pom.xml .
 COPY api-gateway/pom.xml api-gateway/
 COPY auth-service/pom.xml auth-service/
@@ -12,14 +39,25 @@ COPY review-service/pom.xml review-service/
 COPY payment-service/pom.xml payment-service/
 COPY eureka-server/pom.xml eureka-server/
 COPY config-server/pom.xml config-server/
+
+# Download dependencies (cached layer)
 RUN mvn -pl eureka-server dependency:go-offline -B --no-transfer-progress || true
 
+# Copy source code and build
 COPY eureka-server/src eureka-server/src
 RUN mvn -pl eureka-server package -DskipTests -B --no-transfer-progress
 
 # ---- Runtime stage ----
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
+
+# Copy the built JAR file from build stage
 COPY --from=builder /workspace/eureka-server/target/*.jar app.jar
+
+# Expose Eureka Server port (8761 is Netflix Eureka default)
+# Services register at: http://eureka-server:8761/eureka
 EXPOSE 8761
+
+# Start the Eureka Server
+# All microservices will register with this server for service discovery
 ENTRYPOINT ["java", "-jar", "app.jar"]

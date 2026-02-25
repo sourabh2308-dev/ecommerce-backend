@@ -9,6 +9,13 @@ import lombok.extern.jackson.Jacksonized;
 @Getter
 @Builder
 @Jacksonized
+/**
+ * DATA TRANSFER OBJECT (DTO) - Server Response Format
+ * 
+ * Defines the JSON structure returned to HTTP clients.
+ * Built from Entity objects via mapper methods.
+ * May include computed fields not in database.
+ */
 public class UserResponse {
 
     private String uuid;

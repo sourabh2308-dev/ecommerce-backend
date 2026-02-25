@@ -77,6 +77,12 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     @Transactional
+    /**
+     * SERVICE METHOD - Business Logic Implementation
+     * 
+     * Implements business logic with validation, persistence, and external calls.
+     * Wrapped in @Transactional for atomic execution.
+     */
     public OrderResponse createOrder(CreateOrderRequest request, String role, String buyerUuid) {
 
         if (!"BUYER".equalsIgnoreCase(role)) {
@@ -176,6 +182,12 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    /**
+     * SERVICE METHOD - Business Logic Implementation
+     * 
+     * Implements business logic with validation, persistence, and external calls.
+     * Wrapped in @Transactional for atomic execution.
+     */
     public PageResponse<OrderResponse> listOrders(int page, int size, String role, String buyerUuid) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
@@ -187,6 +199,12 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    /**
+     * SERVICE METHOD - Business Logic Implementation
+     * 
+     * Implements business logic with validation, persistence, and external calls.
+     * Wrapped in @Transactional for atomic execution.
+     */
     public PageResponse<OrderResponse> listSellerOrders(int page, int size, String sellerUuid) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<Order> orderPage = orderRepository.findOrdersBySeller(sellerUuid, pageable);
@@ -195,6 +213,12 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Cacheable(value = "orders", key = "#uuid")
+    /**
+     * SERVICE METHOD - Business Logic Implementation
+     * 
+     * Implements business logic with validation, persistence, and external calls.
+     * Wrapped in @Transactional for atomic execution.
+     */
     public OrderResponse getOrderByUuid(String uuid, String role, String userUuid) {
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
@@ -219,6 +243,12 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     @CacheEvict(value = "orders", key = "#uuid")
+    /**
+     * SERVICE METHOD - Business Logic Implementation
+     * 
+     * Implements business logic with validation, persistence, and external calls.
+     * Wrapped in @Transactional for atomic execution.
+     */
     public OrderResponse updateOrderStatus(String uuid, String role, String userUuid, String newStatusStr) {
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
@@ -243,6 +273,12 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     @CacheEvict(value = "orders", key = "#uuid")
+    /**
+     * SERVICE METHOD - Business Logic Implementation
+     * 
+     * Implements business logic with validation, persistence, and external calls.
+     * Wrapped in @Transactional for atomic execution.
+     */
     public void updatePaymentStatus(String uuid, String status) {
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
@@ -260,6 +296,21 @@ public class OrderServiceImpl implements OrderService {
 
     // Private helper methods
 
+    /**
+     * CANCELBYBUYER - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the cancelByBuyer operation.
+     *
+     * PARAMETERS:
+     * @param order - Order value
+     * @param buyerUuid - String value
+     * @param requestedStatus - OrderStatus value
+     *
+     * RETURN VALUE:
+     * @return OrderResponse - Result of the operation
+     *
+     */
     private OrderResponse cancelByBuyer(Order order, String buyerUuid, OrderStatus requestedStatus) {
         if (!order.getBuyerUuid().equals(buyerUuid)) {
             throw new OrderAccessException("You can only modify your own order");
@@ -291,6 +342,20 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
 
+    /**
+     * ADVANCEBYADMIN - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the advanceByAdmin operation.
+     *
+     * PARAMETERS:
+     * @param order - Order value
+     * @param requestedStatus - OrderStatus value
+     *
+     * RETURN VALUE:
+     * @return OrderResponse - Result of the operation
+     *
+     */
     private OrderResponse advanceByAdmin(Order order, OrderStatus requestedStatus) {
         OrderStatus current = order.getStatus();
         OrderStatus expected = switch (current) {
@@ -311,6 +376,21 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
 
+    /**
+     * ADVANCEBYSELLER - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the advanceBySeller operation.
+     *
+     * PARAMETERS:
+     * @param order - Order value
+     * @param sellerUuid - String value
+     * @param requestedStatus - OrderStatus value
+     *
+     * RETURN VALUE:
+     * @return OrderResponse - Result of the operation
+     *
+     */
     private OrderResponse advanceBySeller(Order order, String sellerUuid, OrderStatus requestedStatus) {
         // Verify this seller has items in the order
         boolean hasItems = order.getItems() != null && order.getItems().stream()
@@ -339,6 +419,19 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
 
+    /**
+     * FETCHPRODUCT - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the fetchProduct operation.
+     *
+     * PARAMETERS:
+     * @param productUuid - String value
+     *
+     * RETURN VALUE:
+     * @return ProductDto - Result of the operation
+     *
+     */
     private ProductDto fetchProduct(String productUuid) {
         try {
             return productServiceClient.getProduct(productUuid);
@@ -347,6 +440,19 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    /**
+     * TOPAGERESPONSE - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the toPageResponse operation.
+     *
+     * PARAMETERS:
+     * @param orderPage - Page<Order> value
+     *
+     * RETURN VALUE:
+     * @return PageResponse<OrderResponse> - Result of the operation
+     *
+     */
     private PageResponse<OrderResponse> toPageResponse(Page<Order> orderPage) {
         List<OrderResponse> responses = orderPage.getContent()
                 .stream()
@@ -363,6 +469,19 @@ public class OrderServiceImpl implements OrderService {
                 .build();
     }
 
+    /**
+     * MAPTORESPONSE - Method Documentation
+     *
+     * PURPOSE:
+     * This method handles the mapToResponse operation.
+     *
+     * PARAMETERS:
+     * @param order - Order value
+     *
+     * RETURN VALUE:
+     * @return OrderResponse - Result of the operation
+     *
+     */
     private OrderResponse mapToResponse(Order order) {
         List<OrderItemResponse> itemResponses = order.getItems() == null
                 ? List.of()
