@@ -1,0 +1,45 @@
+{
+  "name": "E-Commerce Backend Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/java:1-17-bullseye",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "installMaven": "true"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-spring-boot-dashboard",
+        "vmware.vscode-spring-boot",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml"
+      ]
+    }
+  },
+
+  "forwardPorts": [
+    8080,
+    8761,
+    8888,
+    5432,
+    9092,
+    6379,
+    9200,
+    9411
+  ],
+
+  "postCreateCommand": "java -version && mvn -version && docker --version",
+
+  "remoteUser": "vscode"
+}
