@@ -612,4 +612,21 @@ public class UserController {
         InternalUserDto dto = userService.getUserByUuidInternal(uuid);
         return dto != null ? ResponseEntity.ok(dto) : ResponseEntity.notFound().build();
     }
+
+    // ─────────────────────────────────────────────
+    // INTERNAL: FORGOT PASSWORD (called by auth-service)
+    // ─────────────────────────────────────────────
+
+    @PostMapping("/internal/forgot-password")
+    public ResponseEntity<ApiResponse<String>> forgotPasswordInternal(@RequestParam String email) {
+        return ResponseEntity.ok(ApiResponse.success(userService.forgotPassword(email), null));
+    }
+
+    @PostMapping("/internal/reset-password")
+    public ResponseEntity<ApiResponse<String>> resetPasswordInternal(
+            @RequestParam String email,
+            @RequestParam String otpCode,
+            @RequestParam String newPassword) {
+        return ResponseEntity.ok(ApiResponse.success(userService.resetPassword(email, otpCode, newPassword), null));
+    }
 }

@@ -1,6 +1,7 @@
 package com.sourabh.user_service.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -30,7 +31,7 @@ public class SellerDetailRequest {
     @NotBlank(message = "Business name is required")
     // Validation constraint
     // @NotBlank - Validates input before processing
-    @Size(max = 200)
+    @Size(min = 2, max = 200, message = "Business name must be between 2 and 200 characters")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -61,7 +62,7 @@ public class SellerDetailRequest {
     @NotBlank(message = "Address line 1 is required")
     // Validation constraint
     // @NotBlank - Validates input before processing
-    @Size(max = 255)
+    @Size(min = 5, max = 255, message = "Address line 1 must be between 5 and 255 characters")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -79,6 +80,7 @@ public class SellerDetailRequest {
     // Validation constraint
     // @NotBlank - Validates input before processing
     @Size(max = 100)
+    @Pattern(regexp = "^[A-Za-z .'-]{2,100}$", message = "City must contain only letters and spaces")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -89,6 +91,7 @@ public class SellerDetailRequest {
     // Validation constraint
     // @NotBlank - Validates input before processing
     @Size(max = 100)
+    @Pattern(regexp = "^[A-Za-z .'-]{2,100}$", message = "State must contain only letters and spaces")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -98,7 +101,7 @@ public class SellerDetailRequest {
     @NotBlank(message = "Pincode is required")
     // Validation constraint
     // @NotBlank - Validates input before processing
-    @Size(max = 10)
+    @Pattern(regexp = "^[0-9]{6}$", message = "Pincode must be exactly 6 digits")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -125,7 +128,7 @@ public class SellerDetailRequest {
     @NotBlank(message = "Bank account number is required")
     // Validation constraint
     // @NotBlank - Validates input before processing
-    @Size(max = 30)
+    @Pattern(regexp = "^[0-9]{9,18}$", message = "Bank account number must be 9 to 18 digits")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -135,7 +138,7 @@ public class SellerDetailRequest {
     @NotBlank(message = "Bank IFSC code is required")
     // Validation constraint
     // @NotBlank - Validates input before processing
-    @Size(max = 20)
+    @Pattern(regexp = "^[A-Z]{4}0[A-Z0-9]{6}$", message = "IFSC must be in valid format (e.g., HDFC0001234)")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint
@@ -146,6 +149,7 @@ public class SellerDetailRequest {
     // Validation constraint
     // @NotBlank - Validates input before processing
     @Size(max = 100)
+    @Pattern(regexp = "^[A-Za-z .&'-]{2,100}$", message = "Bank name must contain only letters and spaces")
     // Validation constraint
     // @Size - Validates input before processing
     // Validation constraint

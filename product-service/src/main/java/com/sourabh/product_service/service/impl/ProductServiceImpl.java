@@ -3,6 +3,8 @@ package com.sourabh.product_service.service.impl;
 import com.sourabh.product_service.common.PageResponse;
 import com.sourabh.product_service.dto.request.CreateProductRequest;
 import com.sourabh.product_service.dto.request.UpdateProductRequest;
+import com.sourabh.product_service.dto.response.CursorPageResponse;
+import com.sourabh.product_service.dto.response.CategoryResponse;
 import com.sourabh.product_service.dto.response.ProductResponse;
 import com.sourabh.product_service.entity.Product;
 import com.sourabh.product_service.entity.ProductStatus;
@@ -10,6 +12,7 @@ import com.sourabh.product_service.exception.ProductNotFoundException;
 import com.sourabh.product_service.exception.ProductStateException;
 import com.sourabh.product_service.exception.UnauthorizedProductAccessException;
 import com.sourabh.product_service.repository.ProductRepository;
+import com.sourabh.product_service.search.service.ProductSearchService;
 import com.sourabh.product_service.service.ProductService;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Predicate;
@@ -225,6 +228,7 @@ import java.util.UUID;
 public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
+    private final ProductSearchService productSearchService;
 
     // ===============================
     // CREATE PRODUCT
@@ -254,6 +258,7 @@ public class ProductServiceImpl implements ProductService {
                 .build();
 
         productRepository.save(product);
+        productSearchService.indexProductByUuid(product.getUuid());
 
         log.info("Product created by seller: {}", sellerUuid);
 
@@ -297,8 +302,15 @@ public class ProductServiceImpl implements ProductService {
         if (request.getPrice() != null)
             product.setPrice(request.getPrice());
 
-        if (request.getStock() != null)
+        if (request.getStock() != null) {
             product.setStock(request.getStock());
+
+            if (request.getStock() <= 0) {
+                product.setStatus(ProductStatus.OUT_OF_STOCK);
+            } else if (product.getStatus() == ProductStatus.OUT_OF_STOCK) {
+                product.setStatus(ProductStatus.ACTIVE);
+            }
+        }
 
         if (request.getCategory() != null)
             product.setCategory(request.getCategory());
@@ -307,6 +319,7 @@ public class ProductServiceImpl implements ProductService {
             product.setImageUrl(request.getImageUrl());
 
         productRepository.save(product);
+        productSearchService.indexProductByUuid(product.getUuid());
 
         log.info("Product updated: uuid={}, by role={}, sellerUuid={}", uuid, role, sellerUuid);
 
@@ -415,6 +428,7 @@ public class ProductServiceImpl implements ProductService {
 
         product.setIsDeleted(true);
         productRepository.save(product);
+        productSearchService.removeProductFromIndex(product.getUuid());
 
         log.info("Product soft-deleted: uuid={}, by role={}", uuid, role);
         return "Product deleted";
@@ -531,6 +545,10 @@ public class ProductServiceImpl implements ProductService {
      *
      */
     private ProductResponse mapToResponse(Product product) {
+        CategoryResponse categoryRef = null;
+        if (product.getCategoryRef() != null) {
+            categoryRef = mapCategoryToResponse(product.getCategoryRef());
+        }
 
         return ProductResponse.builder()
                 .uuid(product.getUuid())
@@ -539,11 +557,25 @@ public class ProductServiceImpl implements ProductService {
                 .price(product.getPrice())
                 .stock(product.getStock())
                 .category(product.getCategory())
+                .categoryRef(categoryRef)
                 .sellerUuid(product.getSellerUuid())
                 .status(product.getStatus().name())
                 .averageRating(product.getAverageRating())
                 .totalReviews(product.getTotalReviews())
                 .imageUrl(product.getImageUrl())
+                .build();
+    }
+
+    private CategoryResponse mapCategoryToResponse(com.sourabh.product_service.entity.Category category) {
+        return CategoryResponse.builder()
+                .uuid(category.getUuid())
+                .name(category.getName())
+                .description(category.getDescription())
+                .imageUrl(category.getImageUrl())
+                .parentUuid(category.getParent() != null ? category.getParent().getUuid() : null)
+                .displayOrder(category.getDisplayOrder())
+                .isActive(category.isActive())
+                .createdAt(category.getCreatedAt())
                 .build();
     }
 
@@ -662,6 +694,31 @@ public class ProductServiceImpl implements ProductService {
 
         log.info("Rating updated for product uuid={}: newAverage={}, totalReviews={}",
                 productUuid, String.format("%.2f", newAverage), currentCount + 1);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CursorPageResponse<ProductResponse> listProductsCursor(Long cursor, int size) {
+        Pageable pageable = PageRequest.of(0, size + 1); // fetch one extra to check hasNext
+        List<Product> products = productRepository.findWithCursor(cursor, pageable);
+
+        boolean hasNext = products.size() > size;
+        if (hasNext) {
+            products = products.subList(0, size);
+        }
+
+        String nextCursor = hasNext ? String.valueOf(products.get(products.size() - 1).getId()) : null;
+        long total = productRepository.countByIsDeletedFalse();
+
+        List<ProductResponse> content = products.stream().map(this::mapToResponse).toList();
+
+        return CursorPageResponse.<ProductResponse>builder()
+                .content(content)
+                .size(content.size())
+                .totalElements(total)
+                .hasNext(hasNext)
+                .nextCursor(nextCursor)
+                .build();
     }
 
 }

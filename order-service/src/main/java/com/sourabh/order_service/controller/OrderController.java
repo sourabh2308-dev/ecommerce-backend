@@ -12,6 +12,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 /**
  * ORDER CONTROLLER - REST API Endpoints for Order Management
  *
@@ -123,6 +125,7 @@ public class OrderController {
 
      */
 
+    @PreAuthorize("hasAnyRole('BUYER', 'ADMIN')")
     @GetMapping
     public ResponseEntity<PageResponse<OrderResponse>> listOrders(
             @RequestParam(defaultValue = "0") int page,
@@ -195,13 +198,15 @@ public class OrderController {
     public ResponseEntity<OrderResponse> updateStatus(
             @PathVariable String uuid,
             @RequestParam String status,
+            @RequestParam(required = false) String returnType,
+            @RequestParam(required = false) String returnReason,
             HttpServletRequest request) {
 
         String role = request.getHeader("X-User-Role");
         String userUuid = request.getHeader("X-User-UUID");
 
         return ResponseEntity.ok(
-                orderService.updateOrderStatus(uuid, role, userUuid, status)
+            orderService.updateOrderStatus(uuid, role, userUuid, status, returnType, returnReason)
         );
     }
 
@@ -231,5 +236,42 @@ public class OrderController {
 
         orderService.updatePaymentStatus(uuid, status);
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * GET /api/order/{uuid}/sub-orders - Get all sub-orders for a parent order
+     * 
+     * Used to view order splits for multi-seller orders.
+     * Returns empty list if order is not split.
+     * 
+     * Response: 200 OK with list of OrderResponse
+     * Auth: Buyer can only see their own orders, admin can see all
+     */
+    @GetMapping("/{uuid}/sub-orders")
+    public ResponseEntity<List<OrderResponse>> getSubOrders(
+            @PathVariable String uuid,
+            @RequestHeader(value = "X-User-Role", required = false) String role,
+            @RequestHeader(value = "X-User-UUID", required = false) String userUuid) {
+
+        List<OrderResponse> subOrders = orderService.getSubOrders(uuid, role, userUuid);
+        return ResponseEntity.ok(subOrders);
+    }
+
+    /**
+     * GET /api/order/group/{groupId} - Get all orders in a group
+     * 
+     * Returns main order + all sub-orders sharing the same orderGroupId.
+     * 
+     * Response: 200 OK with list of OrderResponse
+     * Auth: Buyer can only see their own orders, admin can see all
+     */
+    @GetMapping("/group/{groupId}")
+    public ResponseEntity<List<OrderResponse>> getOrderGroup(
+            @PathVariable String groupId,
+            @RequestHeader(value = "X-User-Role", required = false) String role,
+            @RequestHeader(value = "X-User-UUID", required = false) String userUuid) {
+
+        List<OrderResponse> groupOrders = orderService.getOrderGroup(groupId, role, userUuid);
+        return ResponseEntity.ok(groupOrders);
     }
 }

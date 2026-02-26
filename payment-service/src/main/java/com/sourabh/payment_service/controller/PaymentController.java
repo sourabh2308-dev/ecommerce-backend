@@ -4,6 +4,7 @@ import com.sourabh.payment_service.common.PageResponse;
 import com.sourabh.payment_service.dto.*;
 import com.sourabh.payment_service.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -38,7 +39,7 @@ public class PaymentController {
     @PreAuthorize("hasRole('BUYER')")
     @PostMapping
     public ResponseEntity<String> pay(
-            @RequestBody PaymentRequest request,
+            @Valid @RequestBody PaymentRequest request,
             HttpServletRequest httpRequest) {
         String role      = httpRequest.getHeader("X-User-Role");
         String buyerUuid = httpRequest.getHeader("X-User-UUID");
@@ -143,7 +144,7 @@ public class PaymentController {
     // =========================
     @PreAuthorize("hasRole('SELLER')")
     @GetMapping("/seller")
-    public ResponseEntity<PageResponse<PaymentSplitResponse>> getSellerPayments(
+    public ResponseEntity<PageResponse<PaymentResponse>> getSellerPayments(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             HttpServletRequest httpRequest) {

@@ -99,6 +99,18 @@ public class Order extends BaseAuditEntity {
     // @Builder applied to field below
     private Boolean isDeleted = false;
 
+    // ── Order Splitting (Multi-Seller) ─────────────────
+    /** Type: MAIN (buyer placed) or SUB (seller-specific split) */
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private OrderType orderType = OrderType.MAIN;
+
+    /** UUID of parent order if this is a sub-order (null for MAIN orders) */
+    private String parentOrderUuid;
+
+    /** Groups related orders together (main + all sub-orders share same groupId) */
+    private String orderGroupId;
+
     // ── Shipping address ────────────────────────────────
     private String shippingName;
     private String shippingAddress;
@@ -106,6 +118,28 @@ public class Order extends BaseAuditEntity {
     private String shippingState;
     private String shippingPincode;
     private String shippingPhone;
+
+    @Enumerated(EnumType.STRING)
+    private ReturnType returnType;
+
+    @Column(length = 500)
+    private String returnReason;
+
+    // ── Tax & Currency ──────────────────────────────────
+    @Builder.Default
+    private Double taxPercent = 18.0;    // GST default
+
+    @Builder.Default
+    private Double taxAmount = 0.0;
+
+    @Builder.Default
+    private String currency = "INR";
+
+    /** Coupon code applied (null if none) */
+    private String couponCode;
+
+    @Builder.Default
+    private Double discountAmount = 0.0;
 
     /**
 

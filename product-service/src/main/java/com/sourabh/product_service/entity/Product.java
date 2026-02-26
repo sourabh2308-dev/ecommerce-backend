@@ -102,6 +102,10 @@ public class Product extends BaseAuditEntity {
     // @Column - JPA persistence configuration
     private String category;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private Category categoryRef;
+
     @Column(nullable = false)
     // Database column mapping
     // @Column - JPA persistence configuration
@@ -141,5 +145,8 @@ public class Product extends BaseAuditEntity {
     // Database column mapping
     // @Column - JPA persistence configuration
     private String imageUrl;
+
+    @Builder.Default
+    private Integer lowStockThreshold = 10;
 
 }

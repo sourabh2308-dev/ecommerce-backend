@@ -5,6 +5,7 @@ import com.sourabh.review_service.dto.CreateReviewRequest;
 import com.sourabh.review_service.dto.ReviewResponse;
 import com.sourabh.review_service.dto.UpdateReviewRequest;
 import com.sourabh.review_service.service.ReviewService;
+import com.sourabh.review_service.service.impl.ReviewServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ import org.springframework.web.bind.annotation.*;
 public class ReviewController {
 
     private final ReviewService reviewService;
+    private final ReviewServiceImpl reviewServiceImpl;
 
     // ───────────────────────────────────────────────────────────
     // CREATE REVIEW  —  BUYER only
@@ -213,6 +215,32 @@ public class ReviewController {
 
         String buyerUuid = httpRequest.getHeader("X-User-UUID");
         return ResponseEntity.ok(reviewService.getMyReviews(buyerUuid, page, size));
+    }
+
+    // ── Vote on a review (helpful / not helpful) ──
+
+    @PreAuthorize("hasAnyRole('BUYER', 'SELLER', 'ADMIN')")
+    @PostMapping("/{uuid}/vote")
+    public ResponseEntity<String> voteReview(
+            @PathVariable String uuid,
+            @RequestParam boolean helpful,
+            HttpServletRequest httpRequest) {
+        String voterUuid = httpRequest.getHeader("X-User-UUID");
+        reviewServiceImpl.voteReview(uuid, voterUuid, helpful);
+        return ResponseEntity.ok("Vote recorded");
+    }
+
+    // ── Add image to own review ──
+
+    @PreAuthorize("hasRole('BUYER')")
+    @PostMapping("/{uuid}/images")
+    public ResponseEntity<String> addImage(
+            @PathVariable String uuid,
+            @RequestParam String imageUrl,
+            HttpServletRequest httpRequest) {
+        String buyerUuid = httpRequest.getHeader("X-User-UUID");
+        reviewServiceImpl.addImageToReview(uuid, buyerUuid, imageUrl);
+        return ResponseEntity.ok("Image added");
     }
 }
 

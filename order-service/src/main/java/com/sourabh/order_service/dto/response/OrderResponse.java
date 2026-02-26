@@ -26,6 +26,11 @@ public class OrderResponse {
     private String paymentStatus;
     private List<OrderItemResponse> items;
 
+    // ── Order Splitting (Multi-Seller) ─────────────────
+    private String orderType;  // MAIN or SUB
+    private String parentOrderUuid;  // UUID of parent order (if SUB)
+    private String orderGroupId;  // Groups related orders together
+
     // ── Shipping address ────────────────────────────────
     private String shippingName;
     private String shippingAddress;
@@ -33,6 +38,9 @@ public class OrderResponse {
     private String shippingState;
     private String shippingPincode;
     private String shippingPhone;
+
+    private String returnType;
+    private String returnReason;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

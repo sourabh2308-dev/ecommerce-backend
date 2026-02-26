@@ -11,7 +11,15 @@ x-common-env: &common-env
   CONFIG_SERVER_URL: http://config-server:8888
   REDIS_HOST: redis
   REDIS_PORT: 6379
+  ELASTICSEARCH_URIS: http://elasticsearch:9200
   JAVA_TOOL_OPTIONS: -XX:+UseContainerSupport -XX:InitialRAMPercentage=5 -XX:MaxRAMPercentage=50 -Djava.security.egd=file:/dev/./urandom
+  # ─── SMTP / Email (set real values in .env or override per-service) ───
+  MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+  MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_USERNAME: ${MAIL_USERNAME:-}
+  MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+  MAIL_FROM: ${MAIL_FROM:-noreply@ecommerce.com}
+  MAIL_FROM_NAME: ${MAIL_FROM_NAME:-E-Commerce Platform}
 
 # Shared logging configuration to prevent disk space issues
 x-logging: &default-logging
@@ -53,6 +61,23 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    mem_limit: 768m
+    logging: *default-logging
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms256m -Xmx256m"
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9200/_cluster/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 8
+      start_period: 40s
 
   kafka:
     image: apache/kafka:3.7.0
@@ -181,6 +206,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
       kafka:
         condition: service_healthy
       zipkin:
@@ -194,6 +221,7 @@ services:
     build:
       context: .
       dockerfile: ./order-service/dockerfile
+    restart: unless-stopped
     logging: *default-logging
     environment:
       <<: *common-env

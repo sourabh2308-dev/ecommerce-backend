@@ -24,6 +24,13 @@ public class OrderItem {
 
     private String productUuid;
 
+    private String productName;
+
+    private String productCategory;
+
+    @Column(length = 1000)
+    private String productImageUrl;
+
     private String sellerUuid;
 
     private Double price;

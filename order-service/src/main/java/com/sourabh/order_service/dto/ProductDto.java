@@ -12,5 +12,7 @@ public class ProductDto {
     private Double price;
     private Integer stock;
     private String sellerUuid;
+    private String category;
+    private String imageUrl;
     private String status;
 }

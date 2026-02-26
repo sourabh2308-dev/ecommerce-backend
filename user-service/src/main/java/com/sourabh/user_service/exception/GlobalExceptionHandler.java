@@ -186,6 +186,7 @@ public class GlobalExceptionHandler {
      *
      */
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex) {
+        log.error("Unhandled exception in user-service", ex);
         return buildError("INTERNAL_SERVER_ERROR",
                 "Something went wrong",
                 HttpStatus.INTERNAL_SERVER_ERROR);

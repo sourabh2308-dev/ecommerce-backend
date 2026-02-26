@@ -1,12 +1,37 @@
-# 🛒 E-Commerce Backend (Microservices)
+# 🛒 SourHub (Microservices) - E-Commerce Platform
 
-A production-style e-commerce backend built with **Spring Boot 3.2.x**, **Spring Cloud 2023.x**, **Java 17**, and **Docker Compose**.
+A **production-ready** e-commerce backend built with **Spring Boot 3.2.x**, **Spring Cloud 2023.x**, **Java 17**, and **Docker Compose**.
 
-This repository contains:
-- API Gateway (single public entry point)
-- Auth, User, Product, Order, Payment, Review microservices
-- Eureka (service discovery) + Config Server (shared config)
-- PostgreSQL, Redis, Kafka, Zipkin, Prometheus, Grafana
+## 🎉 Latest Release - February 2026
+
+This repository now includes comprehensive features for a full-featured e-commerce platform:
+
+### Core Platform
+- API Gateway (single public entry point with JWT validation)
+- 6 Microservices: Auth, User, Product, Order, Payment, Review
+- Service Discovery (Eureka) + Centralized Config (Config Server)
+- PostgreSQL, Redis, Kafka, Elasticsearch
+- Observability: Zipkin, Prometheus, Grafana
+
+### New Features (2026 Update)
+- **🔐 Password Recovery** - Forgot/reset password flow
+- **📍 Address Management** - Multiple shipping addresses
+- **🛒 Shopping Cart & Wishlist** - Persistent cart with item management
+- **🔔 Notifications** - Real-time order and payment updates
+- **⭐ Loyalty Program** - Points earning and redemption
+- **💬 Support Tickets** - Multi-channel customer support
+- **🎟️ Coupons & Discounts** - Flexible discount campaigns
+- **↩️ Returns & Exchanges** - Complete return workflow
+- **📦 Shipment Tracking** - Real-time delivery tracking
+- **📄 Invoice Generation** - PDF invoice downloads
+- **📊 Business Dashboards** - Admin and seller analytics
+- **📝 Audit Logs** - Complete compliance trail
+- **🏷️ Product Categories** - Hierarchical catalog organization
+- **🖼️ Multi-Image Products** - Product image galleries
+- **📐 Product Variants** - Size, color, style variations
+- **⚡ Flash Deals** - Time-limited promotions
+- **📈 Inventory Tracking** - Stock movement history
+- **🌟 Enhanced Reviews** - Images, voting, verified purchases
 
 ## 📘 Complete Documentation Bundle
 
@@ -355,12 +380,12 @@ http://localhost:8080
 
 | Service | Endpoints | Details |
 |---------|-----------|---------|
-| **Auth** | login, refresh, logout | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-auth-service---jwt-management) |
-| **User** | register, verify-otp, profile, seller-details | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-user-service---profile--registration) |
-| **Product** | create, search, update, delete | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-product-service---catalog-management) |
-| **Order** | create (with saga!), list, get, update-status | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-order-service---order-processing) |
+| **Auth** | login, refresh, logout, forgot-password, reset-password | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-auth-service---jwt-management) |
+| **User** | register, verify-otp, profile, addresses, cart, wishlist, notifications, loyalty, support | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-user-service---profile--registration) |
+| **Product** | create, search, categories, images, variants, flash-deals, inventory | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-product-service---catalog-management) |
+| **Order** | create, list, coupons, returns, tracking, invoice, audit, dashboards | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-order-service---order-processing) |
 | **Payment** | history, dashboards (seller, admin) | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-payment-service---payment-processing) |
-| **Review** | create, list, update, delete | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-review-service---product-reviews) |
+| **Review** | create, list, update, delete, vote, images | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-review-service---product-reviews) |
 
 ### Example: Order Creation (Shows Saga Pattern)
 
@@ -410,11 +435,49 @@ Public:
 - `POST /api/user/register`
 - `POST /api/user/verify-otp`
 - `POST /api/user/resend-otp?email=...`
+- `POST /api/user/forgot-password`
+- `POST /api/user/reset-password`
 
 Authenticated user:
 - `GET /api/user/me`
 - `PUT /api/user/me`
 - `PUT /api/user/me/change-password`
+
+Addresses (BUYER):
+- `GET /api/user/addresses` - List all addresses
+- `POST /api/user/addresses` - Add new address
+- `PUT /api/user/addresses/{uuid}` - Update address
+- `DELETE /api/user/addresses/{uuid}` - Remove address
+- `PUT /api/user/addresses/{uuid}/default` - Set as default
+
+Cart & Wishlist (BUYER):
+- `GET /api/user/cart` - Get cart with items and total
+- `POST /api/user/cart/add` - Add product to cart
+- `PUT /api/user/cart/update` - Update quantity
+- `DELETE /api/user/cart/remove/{productUuid}` - Remove item
+- `DELETE /api/user/cart/clear` - Clear entire cart
+- `GET /api/user/wishlist` - List wishlist items
+- `POST /api/user/wishlist/add` - Add to wishlist
+- `DELETE /api/user/wishlist/remove/{productUuid}` - Remove from wishlist
+
+Notifications & Loyalty (BUYER):
+- `GET /api/user/notifications` - List all notifications
+- `GET /api/user/notifications/unread-count` - Unread count
+- `PUT /api/user/notifications/{uuid}/read` - Mark as read
+- `PUT /api/user/notifications/read-all` - Mark all as read
+- `GET /api/user/loyalty/balance` - Get loyalty points balance
+- `GET /api/user/loyalty/history` - Points transaction history
+- `POST /api/user/loyalty/redeem` - Redeem points
+
+Support Tickets:
+- `GET /api/user/support/my-tickets` - Buyer's tickets
+- `POST /api/user/support/tickets` - Create new ticket
+- `GET /api/user/support/tickets/{uuid}` - Get ticket details
+- `POST /api/user/support/tickets/{uuid}/messages` - Add message
+- `PUT /api/user/support/tickets/{uuid}/close` - Close ticket
+- `GET /api/user/support/admin/tickets` - All tickets (ADMIN)
+- `PUT /api/user/support/admin/tickets/{uuid}/assign` - Assign to admin
+- `PUT /api/user/support/admin/tickets/{uuid}/status` - Update status
 
 Admin:
 - `PUT /api/user/admin/approve/{uuid}`
@@ -444,9 +507,48 @@ From `ProductController`:
 | DELETE | `/api/product/{uuid}` | SELLER, ADMIN |
 | GET | `/api/product` | Public / role-aware listing |
 | GET | `/api/product/{uuid}` | Public / role-aware |
-| PUT | `/api/product/internal/reduce-stock/{uuid}?quantity=` | Internal |
-| PUT | `/api/product/internal/restore-stock/{uuid}?quantity=` | Internal |
-| PUT | `/api/product/internal/update-rating/{uuid}?rating=` | Internal |
+| GET | `/api/product/search?query=...` | Public (Elasticsearch) |
+| GET | `/api/product/{uuid}/recommendations` | Public |
+
+Categories:
+- `GET /api/product/categories` - List all categories
+- `GET /api/product/categories/tree` - Hierarchical tree
+- `GET /api/product/categories/{uuid}` - Single category
+- `POST /api/product/categories` - Create category (ADMIN)
+- `PUT /api/product/categories/{uuid}` - Update category (ADMIN)
+- `DELETE /api/product/categories/{uuid}` - Delete category (ADMIN)
+
+Product Images:
+- `GET /api/product/{productUuid}/images` - List images
+- `POST /api/product/{productUuid}/images` - Add image (SELLER)
+- `PUT /api/product/{productUuid}/images/{imageId}` - Update (SELLER)
+- `DELETE /api/product/{productUuid}/images/{imageId}` - Remove (SELLER)
+
+Product Variants (Size, Color, etc.):
+- `GET /api/product/{productUuid}/variants` - List variants
+- `GET /api/product/{productUuid}/variants/{variantUuid}` - Get variant
+- `POST /api/product/{productUuid}/variants` - Create variant (SELLER)
+- `PUT /api/product/{productUuid}/variants/{variantUuid}` - Update (SELLER)
+- `DELETE /api/product/{productUuid}/variants/{variantUuid}` - Delete (SELLER)
+
+Flash Deals:
+- `GET /api/product/flash-deals/active` - Active flash deals
+- `GET /api/product/flash-deals` - All deals (ADMIN)
+- `GET /api/product/flash-deals/{uuid}` - Single deal
+- `POST /api/product/flash-deals` - Create deal (ADMIN)
+- `PUT /api/product/flash-deals/{uuid}` - Update deal (ADMIN)
+- `DELETE /api/product/flash-deals/{uuid}` - Delete deal (ADMIN)
+
+Inventory Management:
+- `GET /api/product/inventory/{productUuid}/movements` - Stock history
+- `POST /api/product/inventory/{productUuid}/add` - Add stock (SELLER)
+- `POST /api/product/inventory/{productUuid}/remove` - Remove stock (SELLER)
+- `PUT /api/product/inventory/{productUuid}/set` - Set stock (SELLER)
+
+Internal:
+- `PUT /api/product/internal/reduce-stock/{uuid}?quantity=` | Internal |
+- `PUT /api/product/internal/restore-stock/{uuid}?quantity=` | Internal |
+- `PUT /api/product/internal/update-rating/{uuid}?rating=` | Internal |
 
 ### 7.4 Order Service (`/api/order`)
 
@@ -457,9 +559,41 @@ From `OrderController`:
 | POST | `/api/order` | BUYER |
 | GET | `/api/order` | Role-aware list |
 | GET | `/api/order/seller` | SELLER |
-| PUT | `/api/order/{uuid}/status?status=` | BUYER, ADMIN |
-| PUT | `/api/order/internal/payment-update/{uuid}?status=` | Internal |
 | GET | `/api/order/{uuid}` | Role-aware single order |
+| PUT | `/api/order/{uuid}/status?status=` | BUYER, ADMIN |
+| GET | `/api/order/{orderUuid}/invoice` | BUYER, SELLER, ADMIN |
+
+Coupons:
+- `POST /api/order/coupons` - Create coupon (ADMIN, SELLER)
+- `POST /api/order/coupons/validate` - Validate coupon (BUYER)
+- `GET /api/order/coupons` - List all coupons (ADMIN)
+- `GET /api/order/coupons/{code}` - Get coupon (ADMIN)
+- `DELETE /api/order/coupons/{code}` - Deactivate coupon (ADMIN)
+
+Returns & Exchanges:
+- `POST /api/order/returns` - Request return/exchange (BUYER)
+- `GET /api/order/returns/my-returns` - Buyer's returns
+- `GET /api/order/returns/{uuid}` - Get return details
+- `GET /api/order/returns` - All returns (ADMIN)
+- `PUT /api/order/returns/{uuid}/approve` - Approve return (ADMIN)
+- `PUT /api/order/returns/{uuid}/reject` - Reject return (ADMIN)
+- `PUT /api/order/returns/{uuid}/status` - Update status (ADMIN, SELLER)
+
+Shipment Tracking:
+- `POST /api/order/tracking` - Add tracking event (SELLER, ADMIN)
+- `GET /api/order/tracking/{orderUuid}` - Get tracking history
+
+Dashboards:
+- `GET /api/order/dashboard/admin` - Admin metrics (ADMIN)
+- `GET /api/order/dashboard/seller` - Seller metrics (SELLER)
+
+Audit Logs:
+- `GET /api/order/audit` - All audit logs (ADMIN)
+- `GET /api/order/audit/actor/{actorUuid}` - Actor's actions (ADMIN)
+- `GET /api/order/audit/order/{orderUuid}` - Order audit trail (ADMIN)
+
+Internal:
+- `PUT /api/order/internal/payment-update/{uuid}?status=` | Internal |
 
 ### 7.5 Payment Service (`/api/payment`)
 
@@ -485,6 +619,13 @@ From `ReviewController`:
 | DELETE | `/api/review/{uuid}` | BUYER, ADMIN |
 | GET | `/api/review/me` | BUYER |
 
+Review Images:
+- `POST /api/review/{reviewUuid}/images` - Add image to review (BUYER)
+
+Review Voting (Helpful/Not Helpful):
+- `POST /api/review/{reviewUuid}/vote` - Vote on review (BUYER)
+- `GET /api/review/{reviewUuid}/votes/summary` - Get vote counts
+
 ### 7.7 Swagger / OpenAPI
 
 Gateway aggregates service docs:
@@ -500,33 +641,240 @@ Configured swagger sources in gateway properties:
 
 ---
 
+## 7.8) New Feature Highlights (2026 Update)
+
+This release includes major feature expansions across all services:
+
+### 7.8.1 User Experience Enhancements
+
+**Password Recovery**
+- Forgot password flow with email-based token
+- Secure password reset with expiring tokens
+- Email notifications via Kafka events
+
+**Address Management**
+- Multiple shipping addresses per user
+- Default address selection
+- Address validation and formatting
+
+**Shopping Cart & Wishlist**
+- Persistent cart with quantity management
+- Move items between cart and wishlist
+- Cart totals and item count
+- Clear cart functionality
+
+**Notifications System**
+- Real-time order status notifications
+- Payment confirmations and alerts
+- Return/refund updates
+- Promotional notifications
+- Unread count and mark-as-read
+
+**Loyalty Program**
+- Points earned on orders and reviews
+- Points redemption for discounts
+- Transaction history and balance tracking
+- Expiry management
+
+**Support Ticket System**
+- Multi-category ticket creation
+- Message threading
+- Status tracking (OPEN, IN_PROGRESS, RESOLVED, CLOSED)
+- Admin assignment and resolution
+- Order context linking
+
+### 7.8.2 Order Management Expansion
+
+**Coupon & Discount System**
+- PERCENTAGE and FLAT discount types
+- Usage limit controls (global + per-user)
+- Minimum order amount requirements
+- Validity period enforcement
+- Seller-specific and platform-wide coupons
+- Automatic validation before checkout
+
+**Returns & Exchanges**
+- REFUND and EXCHANGE request types
+- Admin approval/rejection workflow
+- Status progression (REQUESTED → PICKUP → RECEIVED → PROCESSED)
+- Refund amount customization
+- Admin notes and buyer reasons
+- Order status synchronization
+
+**Shipment Tracking**
+- Multi-event tracking timeline
+- Location updates
+- Carrier and tracking number support
+- Real-time status changes
+- Delivery estimates
+
+**Invoice Generation**
+- PDF invoice generation using iText
+- Professional formatting with company branding
+- Itemized breakdown
+- Tax and discount calculations
+- Download for buyers, sellers, and admins
+
+**Order Auditing**
+- Comprehensive audit trail for all order changes
+- Actor (user) tracking
+- Before/after state capture (JSON)
+- Timestamp recording
+- Admin-only access for compliance
+
+**Business Dashboards**
+- **Admin Dashboard**: Platform-wide order metrics, revenue, returns
+- **Seller Dashboard**: Seller-specific orders, deliveries, earnings
+
+### 7.8.3 Product Catalog Improvements
+
+**Category Management**
+- Hierarchical category tree
+- Parent-child relationships
+- Display ordering
+- Category images
+- Active/inactive status
+
+**Multi-Image Support**
+- Multiple product images per product
+- Display order management
+- Alt text for accessibility
+- Image URL storage
+
+**Product Variants**
+- Size, color, style variations
+- Individual SKU tracking
+- Stock management per variant
+- Price overrides
+- Active/inactive variants
+
+**Flash Deals**
+- Time-limited discount campaigns
+- Percentage-based discounts
+- Start and end time enforcement
+- Active deal filtering
+- Admin-only management
+
+**Inventory Tracking**
+- Stock movement history
+- Add/remove stock operations
+- Stock level adjustments
+- Reference tracking (order UUID, manual adjustment)
+- Audit trail for inventory changes
+
+**Smart Recommendations**
+- Product similarity recommendations
+- Based on category and attributes
+- Elasticsearch-powered search
+
+### 7.8.4 Review Enhancements
+
+**Review Images**
+- Multiple images per review
+- URL-based storage
+- Display in review list
+
+**Verified Purchase Badge**
+- Automatic verification for order-based reviews
+- Trust indicator for buyers
+
+**Review Voting**
+- Helpful/Not Helpful votes
+- Vote count display
+- One vote per user per review
+- Aggregate vote summaries
+
+---
+
 ## 8) Event-Driven Flows (Kafka)
 
 Implemented event flows:
-- Payment processing updates order state (payment → order)
-- Review events trigger product rating updates (review → product)
+
+### Core Saga Flows
+- **Payment processing updates order state** (`payment → order`)
+  - Topic: `payment.completed`
+  - order-service updates `paymentStatus` when payment succeeds/fails
+
+- **Review events trigger product rating updates** (`review → product`)
+  - Topic: `review.submitted`
+  - product-service recalculates average rating
+
+### New Event Flows (2026)
+
+- **Order status notifications** (`order → user`)
+  - Topic: `order.status.changed`
+  - user-service creates notifications for buyers
+  - Events: ORDER_PLACED, ORDER_CONFIRMED, ORDER_SHIPPED, ORDER_DELIVERED, ORDER_CANCELLED
+
+- **Return/refund notifications** (`order → user`)
+  - Topic: `order.return.status.changed`
+  - Events: RETURN_APPROVED, RETURN_REJECTED, REFUND_PROCESSED
+
+- **Payment notifications** (`payment → user`)
+  - Topic: `payment.status.changed`
+  - Events: PAYMENT_SUCCESS, PAYMENT_FAILED
+
+- **Loyalty points rewards** (`review → user`, `order → user`)
+  - Topics: `review.submitted`, `order.delivered`
+  - user-service awards loyalty points for orders and reviews
+
+- **Forgot password emails** (`user → notification`)
+  - Topic: `user.password.reset.requested`
+  - Triggers email notification with reset token
 
 Infra notes:
 - Kafka uses `apache/kafka:3.7.0` with KRaft mode in compose.
 - Broker host port exposed on `29092` for local clients.
+- All events use JSON serialization
+- Dead letter queues configured for failed event processing
 
 ---
 
 ## 9) Database Model and Initialization
 
 `init.sql` creates databases:
-- `user_db`
-- `auth_db`
-- `order_db`
-- `review_db`
-- `product_db`
-- `payment_db`
+- `user_db` - Users, addresses, cart, wishlist, notifications, loyalty points, support tickets
+- `auth_db` - Refresh tokens, password reset tokens
+- `order_db` - Orders, items, coupons, returns, tracking events, audit logs
+- `review_db` - Reviews, review images, review votes  
+- `product_db` - Products, categories, images, variants, flash deals, stock movements
+- `payment_db` - Payments, payment splits
 
 Current `init.sql` includes `CREATE DATABASE payment_db;` twice. On first fresh initialization this can cause a startup error if both statements execute in one run. Recommended fix is to keep only one line (or use `CREATE DATABASE ...` guarded logic).
 
 Service persistence model:
 - one database per microservice (database-per-service pattern)
 - each service owns its schema and migrations
+- Flyway handles schema versioning
+
+### Key New Tables (2026 Update)
+
+**user_db:**
+- `address` - Multiple shipping addresses per user
+- `cart_item` - Shopping cart persistence
+- `wishlist_item` - Wishlist management
+- `notification` - User notifications (order updates, promotions)
+- `loyalty_points` - Points transaction history
+- `support_ticket` - Help/support tickets
+- `support_message` - Ticket message threading
+
+**order_db:**
+- `coupon` - Discount coupon definitions
+- `coupon_usage` - Tracks who used which coupons
+- `return_request` - Return/exchange requests
+- `shipment_tracking` - Order tracking events
+- `audit_log` - Complete audit trail for orders
+
+**product_db:**
+- `category` - Hierarchical product categories
+- `product_image` - Multiple images per product
+- `product_variant` - Size/color/style variants
+- `flash_deal` - Time-limited discount campaigns
+- `stock_movement` - Inventory change history
+
+**review_db:**
+- `review_image` - Review image attachments
+- `review_vote` - Helpful/not helpful votes
 
 ---
 

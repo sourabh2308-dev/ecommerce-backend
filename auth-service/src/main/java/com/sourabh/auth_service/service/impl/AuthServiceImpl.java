@@ -1,7 +1,9 @@
 package com.sourabh.auth_service.service.impl;
 
 import com.sourabh.auth_service.dto.UserDto;
+import com.sourabh.auth_service.dto.request.ForgotPasswordRequest;
 import com.sourabh.auth_service.dto.request.LoginRequest;
+import com.sourabh.auth_service.dto.request.ResetPasswordRequest;
 import com.sourabh.auth_service.dto.response.AuthResponse;
 import com.sourabh.auth_service.entity.RefreshToken;
 import com.sourabh.auth_service.exception.AuthException;
@@ -226,14 +228,16 @@ public class AuthServiceImpl implements AuthService {
      * Uses Docker service name (user-service) for container-to-container communication.
      * Protected by X-Internal-Secret header (validated by InternalSecretFilter).
      */
-    private static final String USER_BY_EMAIL_URL = "http://user-service:8080/api/user/internal/email/";
-    
-    /**
-     * User-service endpoint for fetching user by UUID.
-     * Format: http://user-service:8080/api/user/internal/uuid/{uuid}
-     * Used during token refresh to verify user still exists and is active.
-     */
-    private static final String USER_BY_UUID_URL  = "http://user-service:8080/api/user/internal/uuid/";
+    @Value("${service.user.base-url:http://user-service:8080}")
+    private String userServiceBaseUrl;
+
+    private String userByEmailUrl() {
+        return userServiceBaseUrl + "/api/user/internal/email/";
+    }
+
+    private String userByUuidUrl() {
+        return userServiceBaseUrl + "/api/user/internal/uuid/";
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // PUBLIC API METHODS (Implemented from AuthService interface)
@@ -294,12 +298,13 @@ public class AuthServiceImpl implements AuthService {
      *
      */
     public AuthResponse login(LoginRequest request) {
+        String normalizedEmail = request.getEmail() == null ? null : request.getEmail().trim().toLowerCase();
         // Log login attempt (email only, never log passwords)
-        log.info("Login attempt for email: {}", request.getEmail());
+        log.info("Login attempt for email: {}", normalizedEmail);
 
         // Step 1: Fetch user from user-service via REST call
         // Returns Optional.empty() if user not found (converted to AuthException)
-        UserDto user = fetchUser(USER_BY_EMAIL_URL + request.getEmail())
+        UserDto user = fetchUser(userByEmailUrl() + normalizedEmail)
                 .orElseThrow(() -> new AuthException("Invalid credentials"));
 
         // Step 2: Validate account status (email verified, active status)
@@ -412,7 +417,7 @@ public class AuthServiceImpl implements AuthService {
 
         // Step 4: Fetch user from user-service to verify still exists and active
         // Uses UUID instead of email (user might have changed email)
-        UserDto user = fetchUser(USER_BY_UUID_URL + refreshToken.getUserUuid())
+        UserDto user = fetchUser(userByUuidUrl() + refreshToken.getUserUuid())
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         // Step 5: Validate user account still in allowed state
@@ -686,5 +691,53 @@ public class AuthServiceImpl implements AuthService {
             log.info("User logged out: userUuid={}", refreshToken.getUserUuid());
         }
         // If already revoked, do nothing (idempotent operation)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FORGOT PASSWORD / RESET PASSWORD
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Override
+    public String forgotPassword(ForgotPasswordRequest request) {
+        String email = request.getEmail() == null ? null : request.getEmail().trim().toLowerCase();
+        log.info("Forgot password request for email: {}", email);
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Internal-Secret", internalSecret);
+            headers.set("Content-Type", "application/x-www-form-urlencoded");
+
+            String url = userServiceBaseUrl + "/api/user/internal/forgot-password?email=" + email;
+            restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(headers), String.class);
+
+            return "If the email exists, a password reset OTP has been sent.";
+        } catch (HttpClientErrorException e) {
+            log.warn("Forgot password error for {}: {}", email, e.getMessage());
+            // Return generic message to prevent email enumeration
+            return "If the email exists, a password reset OTP has been sent.";
+        }
+    }
+
+    @Override
+    public String resetPassword(ResetPasswordRequest request) {
+        String email = request.getEmail() == null ? null : request.getEmail().trim().toLowerCase();
+        log.info("Password reset attempt for email: {}", email);
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Internal-Secret", internalSecret);
+            headers.set("Content-Type", "application/x-www-form-urlencoded");
+
+            String url = userServiceBaseUrl + "/api/user/internal/reset-password"
+                    + "?email=" + email
+                    + "&otpCode=" + request.getOtpCode()
+                    + "&newPassword=" + request.getNewPassword();
+            restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(headers), String.class);
+
+            return "Password reset successfully";
+        } catch (HttpClientErrorException e) {
+            log.warn("Password reset error for {}: {}", email, e.getMessage());
+            throw new AuthException("Password reset failed: " + e.getResponseBodyAsString());
+        }
     }
 }

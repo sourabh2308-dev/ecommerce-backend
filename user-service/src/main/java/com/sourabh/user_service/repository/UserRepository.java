@@ -24,11 +24,13 @@ import java.util.Optional;
  */
 public interface UserRepository extends JpaRepository<User, Long> {
 
-    Optional<User> findByEmail(String email);
+    Optional<User> findByEmailIgnoreCase(String email);
 
     Optional<User> findByUuid(String uuid);
 
-    boolean existsByEmail(String email);
+    Optional<User> findByUuidAndIsDeletedFalse(String uuid);
+
+    boolean existsByEmailIgnoreCase(String email);
 
     Page<User> findByRoleAndStatus(Role role, UserStatus status, Pageable pageable);
 

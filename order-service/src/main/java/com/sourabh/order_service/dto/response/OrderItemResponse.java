@@ -17,6 +17,9 @@ import lombok.extern.jackson.Jacksonized;
 public class OrderItemResponse {
 
     private String productUuid;
+    private String productName;
+    private String productCategory;
+    private String productImageUrl;
     private String sellerUuid;
     private Double price;
     private Integer quantity;

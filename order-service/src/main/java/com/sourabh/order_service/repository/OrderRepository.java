@@ -1,12 +1,15 @@
 package com.sourabh.order_service.repository;
 
 import com.sourabh.order_service.entity.Order;
+import com.sourabh.order_service.entity.OrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 // Data Repository - Provides database access via Spring Data JPA
@@ -98,4 +101,28 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             @Param("sellerUuid") String sellerUuid,
             Pageable pageable);
 
+    long countByStatus(OrderStatus status);
+
+    long countByIsDeletedFalse();
+
+    @Query("SELECT COALESCE(SUM(o.totalAmount),0) FROM Order o WHERE o.isDeleted = false")
+    double sumTotalRevenue();
+
+    @Query("SELECT COUNT(DISTINCT o) FROM Order o JOIN o.items i WHERE i.sellerUuid = :sellerUuid AND o.status = :status AND o.isDeleted = false")
+    long countBySellerAndStatus(@Param("sellerUuid") String sellerUuid, @Param("status") OrderStatus status);
+
+    @Query("SELECT COALESCE(SUM(o.totalAmount),0) FROM Order o JOIN o.items i WHERE i.sellerUuid = :sellerUuid AND o.isDeleted = false")
+    double sumRevenueForSeller(@Param("sellerUuid") String sellerUuid);
+
+    /** Find unpaid orders older than threshold for auto-cancellation */
+    List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdBefore);
+
+    /** Find sub-orders for a parent order */
+    List<Order> findByParentOrderUuidAndIsDeletedFalse(String parentOrderUuid);
+
+    /** Find all orders in a group (main + all sub-orders) */
+    List<Order> findByOrderGroupIdAndIsDeletedFalse(String orderGroupId);
+
+    /** Find orders by type */
+    Page<Order> findByOrderTypeAndIsDeletedFalse(com.sourabh.order_service.entity.OrderType orderType, Pageable pageable);
 }

@@ -1,5 +1,8 @@
 package com.sourabh.payment_service.dto;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -8,25 +11,18 @@ import lombok.Setter;
  * 
  * Data Transfer Object for payment initiation requests.
  * Contains order and payment details for processing.
- * 
- * USAGE:
- * - Sent by buyer to initiate payment for an order
- * - Validated before payment processing
- * - Used in Kafka event publishing
  */
 @Getter
 @Setter
 public class PaymentRequest {
 
-    // UUID of the order being paid for
-    // Links payment to specific order
+    @NotBlank(message = "Order UUID is required")
     private String orderUuid;
-    
-    // Total payment amount (item prices + delivery fees + platform commission)
-    // Calculated by order-service and sent in event
+
+    @NotNull(message = "Amount is required")
+    @Positive(message = "Amount must be positive")
     private Double amount;
-    
-    // UUID of the buyer making the payment
-    // Used for authorization and audit trail
+
+    @NotBlank(message = "Buyer UUID is required")
     private String buyerUuid;
 }

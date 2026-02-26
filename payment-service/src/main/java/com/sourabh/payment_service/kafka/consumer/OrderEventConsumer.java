@@ -197,8 +197,9 @@ public class OrderEventConsumer {
         List<PaymentSplit> splits = new ArrayList<>();
         for (OrderItemEvent item : items) {
             double itemAmount = item.getSubtotal();
-            double platformFee = Math.round(itemAmount * platformFeePercent) / 100.0;
-            double deliveryFee = deliveryFeePerItem;
+            double platformFee = Math.round(itemAmount * (platformFeePercent / 100.0) * 100.0) / 100.0;
+            int quantity = Math.max(item.getQuantity(), 1);
+            double deliveryFee = deliveryFeePerItem * quantity;
             double sellerPayout = itemAmount - platformFee - deliveryFee;
             if (sellerPayout < 0) sellerPayout = 0;
 

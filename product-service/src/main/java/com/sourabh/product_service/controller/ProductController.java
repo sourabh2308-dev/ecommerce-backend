@@ -3,7 +3,9 @@ package com.sourabh.product_service.controller;
 import com.sourabh.product_service.common.PageResponse;
 import com.sourabh.product_service.dto.request.CreateProductRequest;
 import com.sourabh.product_service.dto.request.UpdateProductRequest;
+import com.sourabh.product_service.dto.response.CursorPageResponse;
 import com.sourabh.product_service.dto.response.ProductResponse;
+import com.sourabh.product_service.search.service.ProductSearchService;
 import com.sourabh.product_service.service.ProductService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.*;
 public class ProductController {
 
     private final ProductService productService;
+    private final ProductSearchService productSearchService;
 
     // =========================
     // CREATE PRODUCT (SELLER)
@@ -292,6 +295,39 @@ public class ProductController {
 
         productService.updateRating(uuid, rating);
         return ResponseEntity.ok().build();
+    }
+
+    // ── Cursor-based pagination ──
+
+    @GetMapping("/cursor")
+    public ResponseEntity<CursorPageResponse<ProductResponse>> listProductsCursor(
+            @RequestParam(required = false) Long cursor,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(productService.listProductsCursor(cursor, size));
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<java.util.List<ProductResponse>> searchProducts(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) Double minPrice,
+            @RequestParam(required = false) Double maxPrice,
+            @RequestParam(defaultValue = "20") Integer size) {
+        return ResponseEntity.ok(productSearchService.search(q, category, minPrice, maxPrice, size));
+    }
+
+    @GetMapping("/search/autocomplete")
+    public ResponseEntity<java.util.List<String>> autocompleteProducts(
+            @RequestParam String prefix,
+            @RequestParam(defaultValue = "10") Integer size) {
+        return ResponseEntity.ok(productSearchService.autocomplete(prefix, size));
+    }
+
+    @PostMapping("/search/reindex")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<String> reindexProducts() {
+        productSearchService.indexAllProducts();
+        return ResponseEntity.ok("Reindex started/completed successfully");
     }
 
 }

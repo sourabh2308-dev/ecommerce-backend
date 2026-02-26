@@ -4,6 +4,8 @@ import com.sourabh.order_service.common.PageResponse;
 import com.sourabh.order_service.dto.request.CreateOrderRequest;
 import com.sourabh.order_service.dto.response.OrderResponse;
 
+import java.util.List;
+
 public interface OrderService {
 
     OrderResponse createOrder(
@@ -21,7 +23,9 @@ public interface OrderService {
             String uuid,
             String role,
             String buyerUuid,
-            String newStatus);
+            String newStatus,
+            String returnType,
+            String returnReason);
 
     PageResponse<OrderResponse> listSellerOrders(
             int page,
@@ -36,5 +40,16 @@ public interface OrderService {
      * ADMIN / SELLER / null (internal service call): may see any order.
      */
     OrderResponse getOrderByUuid(String uuid, String role, String userUuid);
+
+    /**
+     * Get all sub-orders for a parent order.
+     * Used to view order splits for multi-seller orders.
+     */
+    List<OrderResponse> getSubOrders(String parentOrderUuid, String role, String userUuid);
+
+    /**
+     * Get all orders in a group (main order + all sub-orders).
+     */
+    List<OrderResponse> getOrderGroup(String orderGroupId, String role, String userUuid);
 
 }

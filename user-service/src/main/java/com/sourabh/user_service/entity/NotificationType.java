@@ -1,0 +1,17 @@
+package com.sourabh.user_service.entity;
+
+public enum NotificationType {
+    ORDER_PLACED,
+    ORDER_CONFIRMED,
+    ORDER_SHIPPED,
+    ORDER_DELIVERED,
+    ORDER_CANCELLED,
+    PAYMENT_SUCCESS,
+    PAYMENT_FAILED,
+    RETURN_APPROVED,
+    RETURN_REJECTED,
+    REFUND_PROCESSED,
+    PROMOTION,
+    LOYALTY_POINTS,
+    SYSTEM
+}

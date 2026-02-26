@@ -152,6 +152,8 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
             "/api/auth/login",
             "/api/auth/refresh",
+            "/api/auth/forgot-password",
+            "/api/auth/reset-password",
             "/api/user/register",
             "/api/user/verify-otp",
             "/api/user/resend-otp",

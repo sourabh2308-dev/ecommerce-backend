@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Min;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -93,6 +95,23 @@ public class Review {
     // Database column mapping
     // @Column - JPA persistence configuration
     private String comment;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean isDeleted = false;
+
+    /** True if the buyer had a delivered order containing this product */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean verifiedPurchase = false;
+
+    @OneToMany(mappedBy = "review", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ReviewImage> images = new ArrayList<>();
+
+    @OneToMany(mappedBy = "review", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ReviewVote> votes = new ArrayList<>();
 
     private LocalDateTime createdAt;
 }

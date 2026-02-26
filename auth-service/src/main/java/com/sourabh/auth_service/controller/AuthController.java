@@ -1,6 +1,8 @@
 package com.sourabh.auth_service.controller;
 
+import com.sourabh.auth_service.dto.request.ForgotPasswordRequest;
 import com.sourabh.auth_service.dto.request.LoginRequest;
+import com.sourabh.auth_service.dto.request.ResetPasswordRequest;
 import com.sourabh.auth_service.dto.response.AuthResponse;
 import com.sourabh.auth_service.service.AuthService;
 import jakarta.validation.Valid;
@@ -342,5 +344,19 @@ public class AuthController {
         authService.logout(refreshToken);
         // 204 No Content - successful operation, no response body
         return ResponseEntity.noContent().build();
+    }
+
+    // ─────────────────────────────────────────────
+    // FORGOT PASSWORD
+    // ─────────────────────────────────────────────
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<String> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        return ResponseEntity.ok(authService.forgotPassword(request));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<String> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return ResponseEntity.ok(authService.resetPassword(request));
     }
 }

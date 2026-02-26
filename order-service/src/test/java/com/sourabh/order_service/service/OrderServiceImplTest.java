@@ -37,6 +37,8 @@ class OrderServiceImplTest {
     @Mock private OrderRepository orderRepository;
     @Mock private ProductServiceClient productServiceClient;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private com.sourabh.order_service.service.OrderSplitterService orderSplitterService;
+    @Mock private com.sourabh.order_service.kafka.OrderNotificationPublisher notificationPublisher;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -155,7 +157,7 @@ class OrderServiceImplTest {
                 .thenReturn(Optional.of(sampleOrder));
         when(orderRepository.save(any())).thenReturn(sampleOrder);
 
-        OrderResponse response = orderService.updateOrderStatus("order-uuid", "BUYER", "buyer-uuid", "CANCELLED");
+        OrderResponse response = orderService.updateOrderStatus("order-uuid", "BUYER", "buyer-uuid", "CANCELLED", null, null);
 
         assertThat(response.getStatus()).isEqualTo("CANCELLED");
     }
@@ -167,7 +169,7 @@ class OrderServiceImplTest {
                 .thenReturn(Optional.of(sampleOrder));
 
         assertThatThrownBy(() ->
-                orderService.updateOrderStatus("order-uuid", "BUYER", "other-buyer", "CANCELLED"))
+                orderService.updateOrderStatus("order-uuid", "BUYER", "other-buyer", "CANCELLED", null, null))
                 .isInstanceOf(OrderAccessException.class)
                 .hasMessageContaining("your own order");
     }
@@ -179,9 +181,9 @@ class OrderServiceImplTest {
                 .thenReturn(Optional.of(sampleOrder));
 
         assertThatThrownBy(() ->
-                orderService.updateOrderStatus("order-uuid", "BUYER", "buyer-uuid", "SHIPPED"))
+                orderService.updateOrderStatus("order-uuid", "BUYER", "buyer-uuid", "SHIPPED", null, null))
                 .isInstanceOf(OrderStateException.class)
-                .hasMessageContaining("only cancel");
+                .hasMessageContaining("only cancel or request return");
     }
 
     // ──────────────────────────────────────────────────────
@@ -195,7 +197,7 @@ class OrderServiceImplTest {
                 .thenReturn(Optional.of(sampleOrder));
         when(orderRepository.save(any())).thenReturn(sampleOrder);
 
-        OrderResponse response = orderService.updateOrderStatus("order-uuid", "ADMIN", null, "CONFIRMED");
+        OrderResponse response = orderService.updateOrderStatus("order-uuid", "ADMIN", null, "CONFIRMED", null, null);
 
         assertThat(response.getStatus()).isEqualTo("CONFIRMED");
     }
@@ -207,7 +209,7 @@ class OrderServiceImplTest {
                 .thenReturn(Optional.of(sampleOrder));
 
         assertThatThrownBy(() ->
-                orderService.updateOrderStatus("order-uuid", "ADMIN", null, "SHIPPED"))
+                orderService.updateOrderStatus("order-uuid", "ADMIN", null, "SHIPPED", null, null))
                 .isInstanceOf(OrderStateException.class)
                 .hasMessageContaining("Invalid transition");
     }

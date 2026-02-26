@@ -2,6 +2,7 @@ package com.sourabh.product_service.service;
 
 import com.sourabh.product_service.dto.request.CreateProductRequest;
 import com.sourabh.product_service.dto.request.UpdateProductRequest;
+import com.sourabh.product_service.dto.response.CursorPageResponse;
 import com.sourabh.product_service.dto.response.ProductResponse;
 import com.sourabh.product_service.common.PageResponse;
 
@@ -44,5 +45,8 @@ public interface ProductService {
     String restoreStock(String productUuid, Integer quantity);
 
     void updateRating(String productUuid, Integer rating);
+
+    /** Cursor-based pagination for product listing */
+    CursorPageResponse<ProductResponse> listProductsCursor(Long cursor, int size);
 
 }

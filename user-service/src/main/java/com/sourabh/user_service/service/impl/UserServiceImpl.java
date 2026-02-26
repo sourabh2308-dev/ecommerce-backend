@@ -13,6 +13,7 @@ import com.sourabh.user_service.exception.UserNotFoundException;
 import com.sourabh.user_service.repository.OTPVerificationRepository;
 import com.sourabh.user_service.repository.SellerDetailRepository;
 import com.sourabh.user_service.repository.UserRepository;
+import com.sourabh.user_service.service.EmailService;
 import com.sourabh.user_service.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,9 +28,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Random;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -212,10 +214,12 @@ public class UserServiceImpl implements UserService {
     private final OTPVerificationRepository otpRepository;
     private final SellerDetailRepository sellerDetailRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
 
 
     @Override
     @Transactional
+    @CacheEvict(value = "usersByEmail", allEntries = true)
     /**
      * SERVICE METHOD - Business Logic Implementation
      * 
@@ -224,14 +228,38 @@ public class UserServiceImpl implements UserService {
      */
     public UserResponse registerUser(RegisterRequest request) {
 
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new UserAlreadyExistsException("Email already registered");
+        String normalizedEmail = normalizeEmail(request.getEmail());
+
+        Optional<User> existingUserOptional = userRepository.findByEmailIgnoreCase(normalizedEmail);
+
+        if (existingUserOptional.isPresent()) {
+            User existingUser = existingUserOptional.get();
+
+            if (existingUser.isEmailVerified() && existingUser.getStatus() != UserStatus.PENDING_VERIFICATION) {
+                throw new UserAlreadyExistsException("Email already registered");
+            }
+
+            existingUser.setFirstName(request.getFirstName());
+            existingUser.setLastName(request.getLastName());
+            existingUser.setPhoneNumber(request.getPhoneNumber());
+            existingUser.setPassword(passwordEncoder.encode(request.getPassword()));
+            existingUser.setRole(request.getRole());
+            existingUser.setStatus(UserStatus.PENDING_VERIFICATION);
+            existingUser.setEmailVerified(false);
+            existingUser.setApproved(false);
+            existingUser.setDeleted(false);
+
+            User updatedUser = userRepository.save(existingUser);
+            generateAndSendOTP(updatedUser, OTPType.EMAIL);
+
+            log.info("Unverified user re-registered: email={}, role={}", updatedUser.getEmail(), updatedUser.getRole());
+            return mapToResponse(updatedUser);
         }
 
         User user = User.builder()
                 .firstName(request.getFirstName())
                 .lastName(request.getLastName())
-                .email(request.getEmail())
+                .email(normalizedEmail)
                 .phoneNumber(request.getPhoneNumber())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(request.getRole())
@@ -249,6 +277,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "usersByEmail", allEntries = true)
     /**
      * SERVICE METHOD - Business Logic Implementation
      * 
@@ -257,7 +286,7 @@ public class UserServiceImpl implements UserService {
      */
     public String verifyOTP(VerifyOTPRequest request) {
 
-        User user = userRepository.findByEmail(request.getEmail())
+        User user = userRepository.findByEmailIgnoreCase(normalizeEmail(request.getEmail()))
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         OTPVerification otp = otpRepository
@@ -320,7 +349,7 @@ public class UserServiceImpl implements UserService {
      */
     private void generateAndSendOTP(User user, OTPType type) {
 
-        String otpCode = String.valueOf(100000 + new Random().nextInt(900000));
+        String otpCode = String.valueOf(100000 + new SecureRandom().nextInt(900000));
 
         OTPVerification otp = OTPVerification.builder()
                 .otpCode(otpCode)
@@ -331,8 +360,13 @@ public class UserServiceImpl implements UserService {
 
         otpRepository.save(otp);
 
-        // Simulate sending OTP
-        log.info("[OTP] Generated for email={}: {}", user.getEmail(), otpCode);
+        // Send OTP via email
+        String subject = (type == OTPType.PASSWORD_RESET)
+                ? "Password Reset OTP"
+                : "Email Verification OTP";
+
+        emailService.sendOtpEmail(user.getEmail(), user.getFirstName(), otpCode, subject);
+        log.info("[OTP] Sent {} OTP to email={}", type, user.getEmail());
     }
 
     /**
@@ -368,7 +402,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -504,7 +538,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -553,7 +587,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -582,7 +616,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -664,7 +698,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -690,7 +724,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -754,6 +788,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "usersByEmail", allEntries = true)
     /**
      * SERVICE METHOD - Business Logic Implementation
      * 
@@ -762,15 +797,20 @@ public class UserServiceImpl implements UserService {
      */
     public String resendOTP(String email) {
 
-        User user = userRepository.findByEmail(email)
+        String normalizedEmail = normalizeEmail(email);
+
+        User user = userRepository.findByEmailIgnoreCase(normalizedEmail)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
-        OTPVerification otp = otpRepository
-                .findTopByUserAndTypeOrderByCreatedAtDesc(user, OTPType.EMAIL)
-                .orElseThrow(() -> new OTPException("No previous OTP found"));
+        if (user.getStatus() != UserStatus.PENDING_VERIFICATION || user.isEmailVerified()) {
+            throw new OTPException("Email already verified. Please login.");
+        }
 
-        if (otp.getLastSentAt().plusSeconds(60)
-                .isAfter(LocalDateTime.now())) {
+        Optional<OTPVerification> latestOtp = otpRepository
+            .findTopByUserAndTypeOrderByCreatedAtDesc(user, OTPType.EMAIL);
+
+        if (latestOtp.isPresent() && latestOtp.get().getLastSentAt() != null
+            && latestOtp.get().getLastSentAt().plusSeconds(60).isAfter(LocalDateTime.now())) {
             throw new OTPException("Please wait before requesting OTP again");
         }
 
@@ -784,7 +824,7 @@ public class UserServiceImpl implements UserService {
     // ─────────────────────────────────────────────
 
     @Override
-    @Cacheable(value = "usersByEmail", key = "#email")
+    @Cacheable(value = "usersByEmail", key = "#email == null ? '' : #email.toLowerCase()")
     /**
      * SERVICE METHOD - Business Logic Implementation
      * 
@@ -792,14 +832,18 @@ public class UserServiceImpl implements UserService {
      * Wrapped in @Transactional for atomic execution.
      */
     public InternalUserDto getUserByEmailInternal(String email) {
-        log.debug("Cache miss for usersByEmail email={} — fetching from DB", email);
-        return userRepository.findByEmail(email)
+        String normalizedEmail = normalizeEmail(email);
+        log.debug("Cache miss for usersByEmail email={} — fetching from DB", normalizedEmail);
+        return userRepository.findByEmailIgnoreCase(normalizedEmail)
                 .map(this::toInternalDto)
                 .orElse(null);
     }
 
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
+    }
+
     @Override
-    @Cacheable(value = "usersByUuid", key = "#uuid")
     /**
      * SERVICE METHOD - Business Logic Implementation
      * 
@@ -845,7 +889,7 @@ public class UserServiceImpl implements UserService {
     // ─────────────────────────────────────────────
 
     @Override
-    @Cacheable(value = "usersByUuid", key = "#userUuid")
+    @Cacheable(value = "profileByUuid", key = "#userUuid")
     /**
      * SERVICE METHOD - Business Logic Implementation
      * 
@@ -862,7 +906,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -916,7 +960,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     @Caching(evict = {
-            @CacheEvict(value = "usersByUuid",  key = "#userUuid"),
+            @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
     /**
@@ -947,6 +991,69 @@ public class UserServiceImpl implements UserService {
         userRepository.save(user);
         log.info("User unblocked: uuid={}", userUuid);
         return "User unblocked successfully";
+    }
+
+    // ─────────────────────────────────────────────
+    // FORGOT PASSWORD (internal, called by auth-service)
+    // ─────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public String forgotPassword(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        User user = userRepository.findByEmailIgnoreCase(normalizedEmail)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        if (!user.isEmailVerified()) {
+            throw new UserStateException("Email not verified");
+        }
+
+        if (user.getStatus() == UserStatus.BLOCKED || user.getStatus() == UserStatus.DELETED) {
+            throw new UserStateException("Account is not active");
+        }
+
+        generateAndSendOTP(user, OTPType.PASSWORD_RESET);
+        return "Password reset OTP sent successfully";
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "usersByEmail", allEntries = true)
+    public String resetPassword(String email, String otpCode, String newPassword) {
+        String normalizedEmail = normalizeEmail(email);
+        User user = userRepository.findByEmailIgnoreCase(normalizedEmail)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+        OTPVerification otp = otpRepository
+                .findTopByUserAndTypeOrderByCreatedAtDesc(user, OTPType.PASSWORD_RESET)
+                .orElseThrow(() -> new OTPException("No password reset OTP found. Please request one first."));
+
+        if (otp.isVerified()) {
+            throw new OTPException("OTP already used");
+        }
+
+        if (otp.getExpiryTime().isBefore(LocalDateTime.now())) {
+            throw new OTPException("OTP expired");
+        }
+
+        if (otp.getAttemptCount() >= 5) {
+            throw new OTPException("OTP locked - too many failed attempts. Please request a new OTP.");
+        }
+
+        if (!otp.getOtpCode().equals(otpCode)) {
+            otp.setAttemptCount(otp.getAttemptCount() + 1);
+            otpRepository.save(otp);
+            throw new OTPException("Invalid OTP. " + (5 - otp.getAttemptCount()) + " attempt(s) remaining.");
+        }
+
+        otp.setVerified(true);
+        otpRepository.save(otp);
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        log.info("Password reset successful for email={}", normalizedEmail);
+        return "Password reset successfully";
     }
 
 }

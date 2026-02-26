@@ -21,7 +21,8 @@ public class ProductResponse {
     private String description;
     private Double price;
     private Integer stock;
-    private String category;
+    private String category;  // Legacy category string
+    private CategoryResponse categoryRef;  // New structured category
     private String sellerUuid;
     private String status;
     private Double averageRating;

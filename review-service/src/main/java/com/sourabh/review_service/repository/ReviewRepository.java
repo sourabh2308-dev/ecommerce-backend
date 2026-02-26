@@ -21,15 +21,15 @@ import java.util.Optional;
  */
 public interface ReviewRepository extends JpaRepository<Review, Long> {
 
-    Optional<Review> findByUuid(String uuid);
+    Optional<Review> findByUuidAndIsDeletedFalse(String uuid);
 
-    boolean existsByProductUuidAndBuyerUuid(String productUuid, String buyerUuid);
+    boolean existsByProductUuidAndBuyerUuidAndIsDeletedFalse(String productUuid, String buyerUuid);
 
-    Page<Review> findByProductUuid(String productUuid, Pageable pageable);
+    Page<Review> findByProductUuidAndIsDeletedFalse(String productUuid, Pageable pageable);
 
-    Page<Review> findByBuyerUuid(String buyerUuid, Pageable pageable);
+    Page<Review> findByBuyerUuidAndIsDeletedFalse(String buyerUuid, Pageable pageable);
 
-    List<Review> findBySellerUuid(String sellerUuid);
+    List<Review> findBySellerUuidAndIsDeletedFalse(String sellerUuid);
 }
 
 

@@ -13,8 +13,8 @@ public interface PaymentService {
 
     PaymentResponse getPaymentByOrderUuid(String orderUuid, String role, String buyerUuid);
 
-    /** Seller's payments/earnings — paginated list of payment splits */
-    PageResponse<PaymentSplitResponse> getSellerPayments(String sellerUuid, int page, int size);
+    /** Seller's payments/earnings — paginated list of payments with splits */
+    PageResponse<PaymentResponse> getSellerPayments(String sellerUuid, int page, int size);
 
     /** Seller financial dashboard */
     SellerDashboardResponse getSellerDashboard(String sellerUuid);

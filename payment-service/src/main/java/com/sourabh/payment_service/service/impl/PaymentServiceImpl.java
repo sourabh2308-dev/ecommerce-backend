@@ -385,22 +385,22 @@ public class PaymentServiceImpl implements PaymentService {
      * Implements business logic with validation, persistence, and external calls.
      * Wrapped in @Transactional for atomic execution.
      */
-    public PageResponse<PaymentSplitResponse> getSellerPayments(String sellerUuid, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        Page<PaymentSplit> splitPage = paymentSplitRepository.findBySellerUuid(sellerUuid, pageable);
+    public PageResponse<PaymentResponse> getSellerPayments(String sellerUuid, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<Payment> paymentPage = paymentRepository.findBySellerUuid(sellerUuid, pageable);
 
-        List<PaymentSplitResponse> content = splitPage.getContent()
+        List<PaymentResponse> content = paymentPage.getContent()
                 .stream()
-                .map(this::mapSplitToResponse)
+                .map(this::mapToResponse)
                 .toList();
 
-        return PageResponse.<PaymentSplitResponse>builder()
+        return PageResponse.<PaymentResponse>builder()
                 .content(content)
-                .page(splitPage.getNumber())
-                .size(splitPage.getSize())
-                .totalElements(splitPage.getTotalElements())
-                .totalPages(splitPage.getTotalPages())
-                .last(splitPage.isLast())
+                .page(paymentPage.getNumber())
+                .size(paymentPage.getSize())
+                .totalElements(paymentPage.getTotalElements())
+                .totalPages(paymentPage.getTotalPages())
+                .last(paymentPage.isLast())
                 .build();
     }
 

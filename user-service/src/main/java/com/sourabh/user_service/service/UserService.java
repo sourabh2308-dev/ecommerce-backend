@@ -62,5 +62,11 @@ public interface UserService {
     InternalUserDto getUserByEmailInternal(String email);
 
     InternalUserDto getUserByUuidInternal(String uuid);
+
+    // ─── Forgot Password (internal, called by auth-service) ─────────────
+
+    String forgotPassword(String email);
+
+    String resetPassword(String email, String otpCode, String newPassword);
 }
 

@@ -43,6 +43,7 @@ class ReviewServiceImplTest {
     @Mock private ReviewRepository reviewRepository;
     @Mock private OrderServiceClient orderServiceClient;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private com.sourabh.review_service.repository.ReviewVoteRepository reviewVoteRepository;
 
     @InjectMocks
     private ReviewServiceImpl reviewService;
@@ -52,6 +53,10 @@ class ReviewServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // Setup default mocks for reviewVoteRepository (lenient for tests that don't use them)
+        lenient().when(reviewVoteRepository.countHelpfulByReviewId(any())).thenReturn(0L);
+        lenient().when(reviewVoteRepository.countNotHelpfulByReviewId(any())).thenReturn(0L);
+
         OrderItemDto item = new OrderItemDto();
         item.setProductUuid("prod-uuid");
         item.setSellerUuid("seller-uuid");
@@ -77,7 +82,7 @@ class ReviewServiceImplTest {
     @DisplayName("createReview: success — valid buyer, delivered order, new review")
     void createReview_success() {
         when(orderServiceClient.getOrder("order-uuid")).thenReturn(deliveredOrder);
-        when(reviewRepository.existsByProductUuidAndBuyerUuid("prod-uuid", "buyer-uuid")).thenReturn(false);
+        when(reviewRepository.existsByProductUuidAndBuyerUuidAndIsDeletedFalse("prod-uuid", "buyer-uuid")).thenReturn(false);
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> {
             Review r = inv.getArgument(0);
             r.setCreatedAt(LocalDateTime.now());
@@ -128,7 +133,7 @@ class ReviewServiceImplTest {
     @DisplayName("createReview: fails — duplicate review")
     void createReview_duplicate_throwsReviewAlreadyExistsException() {
         when(orderServiceClient.getOrder("order-uuid")).thenReturn(deliveredOrder);
-        when(reviewRepository.existsByProductUuidAndBuyerUuid("prod-uuid", "buyer-uuid")).thenReturn(true);
+        when(reviewRepository.existsByProductUuidAndBuyerUuidAndIsDeletedFalse("prod-uuid", "buyer-uuid")).thenReturn(true);
 
         assertThatThrownBy(() -> reviewService.createReview(createRequest, "buyer-uuid"))
                 .isInstanceOf(ReviewAlreadyExistsException.class)
@@ -146,7 +151,7 @@ class ReviewServiceImplTest {
     void getReviewsByProduct_returnsPaginatedResults() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
         var pageImpl = new PageImpl<>(List.of(r), PageRequest.of(0, 10), 1);
-        when(reviewRepository.findByProductUuid(eq("prod-uuid"), any())).thenReturn(pageImpl);
+        when(reviewRepository.findByProductUuidAndIsDeletedFalse(eq("prod-uuid"), any())).thenReturn(pageImpl);
 
         PageResponse<ReviewResponse> response = reviewService.getReviewsByProduct("prod-uuid", 0, 10);
 
@@ -162,7 +167,7 @@ class ReviewServiceImplTest {
     @DisplayName("getReviewByUuid: success")
     void getReviewByUuid_success() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
-        when(reviewRepository.findByUuid("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.findByUuidAndIsDeletedFalse("rev-uuid")).thenReturn(Optional.of(r));
 
         ReviewResponse result = reviewService.getReviewByUuid("rev-uuid");
 
@@ -172,7 +177,7 @@ class ReviewServiceImplTest {
     @Test
     @DisplayName("getReviewByUuid: not found throws ReviewNotFoundException")
     void getReviewByUuid_notFound() {
-        when(reviewRepository.findByUuid("bad-uuid")).thenReturn(Optional.empty());
+        when(reviewRepository.findByUuidAndIsDeletedFalse("bad-uuid")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> reviewService.getReviewByUuid("bad-uuid"))
                 .isInstanceOf(ReviewNotFoundException.class);
@@ -186,7 +191,7 @@ class ReviewServiceImplTest {
     @DisplayName("updateReview: success — buyer can update own review comment")
     void updateReview_success() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
-        when(reviewRepository.findByUuid("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.findByUuidAndIsDeletedFalse("rev-uuid")).thenReturn(Optional.of(r));
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
 
         UpdateReviewRequest req = new UpdateReviewRequest();
@@ -201,7 +206,7 @@ class ReviewServiceImplTest {
     @DisplayName("updateReview: fails — wrong buyer")
     void updateReview_wrongBuyer() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
-        when(reviewRepository.findByUuid("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.findByUuidAndIsDeletedFalse("rev-uuid")).thenReturn(Optional.of(r));
 
         UpdateReviewRequest req = new UpdateReviewRequest();
         req.setComment("Hacked!");
@@ -218,31 +223,35 @@ class ReviewServiceImplTest {
     @DisplayName("deleteReview: buyer can delete own review")
     void deleteReview_byBuyer_success() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
-        when(reviewRepository.findByUuid("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.findByUuidAndIsDeletedFalse("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
 
         String result = reviewService.deleteReview("rev-uuid", "BUYER", "buyer-uuid");
 
         assertThat(result).contains("deleted");
-        verify(reviewRepository).delete(r);
+        verify(reviewRepository).save(any(Review.class));
+        assertThat(r.isDeleted()).isTrue();
     }
 
     @Test
     @DisplayName("deleteReview: admin can delete any review")
     void deleteReview_byAdmin_success() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
-        when(reviewRepository.findByUuid("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.findByUuidAndIsDeletedFalse("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
 
         String result = reviewService.deleteReview("rev-uuid", "ADMIN", "admin-uuid");
 
         assertThat(result).contains("deleted");
-        verify(reviewRepository).delete(r);
+        verify(reviewRepository).save(any(Review.class));
+        assertThat(r.isDeleted()).isTrue();
     }
 
     @Test
     @DisplayName("deleteReview: fails — buyer tries to delete another's review")
     void deleteReview_wrongBuyer_throwsReviewAccessException() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
-        when(reviewRepository.findByUuid("rev-uuid")).thenReturn(Optional.of(r));
+        when(reviewRepository.findByUuidAndIsDeletedFalse("rev-uuid")).thenReturn(Optional.of(r));
 
         assertThatThrownBy(() -> reviewService.deleteReview("rev-uuid", "BUYER", "other-buyer"))
                 .isInstanceOf(ReviewAccessException.class);
@@ -257,7 +266,7 @@ class ReviewServiceImplTest {
     void getMyReviews_returnsResults() {
         Review r = buildReview("rev-uuid", "prod-uuid", "buyer-uuid");
         var pageImpl = new PageImpl<>(List.of(r), PageRequest.of(0, 10), 1);
-        when(reviewRepository.findByBuyerUuid(eq("buyer-uuid"), any())).thenReturn(pageImpl);
+        when(reviewRepository.findByBuyerUuidAndIsDeletedFalse(eq("buyer-uuid"), any())).thenReturn(pageImpl);
 
         PageResponse<ReviewResponse> response = reviewService.getMyReviews("buyer-uuid", 0, 10);
 
@@ -274,7 +283,7 @@ class ReviewServiceImplTest {
     void createReview_minimumRating() {
         createRequest.setRating(1);
         when(orderServiceClient.getOrder("order-uuid")).thenReturn(deliveredOrder);
-        when(reviewRepository.existsByProductUuidAndBuyerUuid("prod-uuid", "buyer-uuid")).thenReturn(false);
+        when(reviewRepository.existsByProductUuidAndBuyerUuidAndIsDeletedFalse("prod-uuid", "buyer-uuid")).thenReturn(false);
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ReviewResponse result = reviewService.createReview(createRequest, "buyer-uuid");
@@ -287,7 +296,7 @@ class ReviewServiceImplTest {
     void createReview_maximumRating() {
         createRequest.setRating(5);
         when(orderServiceClient.getOrder("order-uuid")).thenReturn(deliveredOrder);
-        when(reviewRepository.existsByProductUuidAndBuyerUuid("prod-uuid", "buyer-uuid")).thenReturn(false);
+        when(reviewRepository.existsByProductUuidAndBuyerUuidAndIsDeletedFalse("prod-uuid", "buyer-uuid")).thenReturn(false);
         when(reviewRepository.save(any(Review.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ReviewResponse result = reviewService.createReview(createRequest, "buyer-uuid");
@@ -299,7 +308,7 @@ class ReviewServiceImplTest {
     @DisplayName("getReviewsByProduct: returns empty page for unknown product")
     void getReviewsByProduct_unknownProduct_empty() {
         var emptyPage = new PageImpl<Review>(List.of(), PageRequest.of(0, 10), 0);
-        when(reviewRepository.findByProductUuid(eq("unknown-prod"), any())).thenReturn(emptyPage);
+        when(reviewRepository.findByProductUuidAndIsDeletedFalse(eq("unknown-prod"), any())).thenReturn(emptyPage);
 
         PageResponse<ReviewResponse> response = reviewService.getReviewsByProduct("unknown-prod", 0, 10);
 
@@ -310,7 +319,7 @@ class ReviewServiceImplTest {
     @Test
     @DisplayName("deleteReview: not found throws ReviewNotFoundException")
     void deleteReview_notFound() {
-        when(reviewRepository.findByUuid("bad-uuid")).thenReturn(Optional.empty());
+        when(reviewRepository.findByUuidAndIsDeletedFalse("bad-uuid")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> reviewService.deleteReview("bad-uuid", "BUYER", "buyer-uuid"))
                 .isInstanceOf(ReviewNotFoundException.class);
@@ -320,7 +329,7 @@ class ReviewServiceImplTest {
     @DisplayName("getMyReviews: returns empty page when buyer has no reviews")
     void getMyReviews_noReviews() {
         var emptyPage = new PageImpl<Review>(List.of(), PageRequest.of(0, 10), 0);
-        when(reviewRepository.findByBuyerUuid(eq("buyer-uuid"), any())).thenReturn(emptyPage);
+        when(reviewRepository.findByBuyerUuidAndIsDeletedFalse(eq("buyer-uuid"), any())).thenReturn(emptyPage);
 
         PageResponse<ReviewResponse> response = reviewService.getMyReviews("buyer-uuid", 0, 10);
 
