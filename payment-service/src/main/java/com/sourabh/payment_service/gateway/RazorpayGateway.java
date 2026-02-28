@@ -29,8 +29,10 @@ public class RazorpayGateway implements PaymentGateway {
 
     /**
      * Primary constructor used by Spring; a RestTemplate bean may be provided for
-     * easier testing.
+     * easier testing.  This constructor is explicitly autowired to avoid
+     * confusion when multiple constructors are present.
      */
+    @org.springframework.beans.factory.annotation.Autowired
     public RazorpayGateway(
             @Value("${razorpay.key-id:}") String keyId,
             @Value("${razorpay.key-secret:}") String keySecret,
@@ -44,7 +46,8 @@ public class RazorpayGateway implements PaymentGateway {
     }
 
     // convenience constructor for tests
-    public RazorpayGateway(String keyId, String keySecret) {
+    // make non-public so Spring ignores it when performing autowiring
+    RazorpayGateway(String keyId, String keySecret) {
         this(keyId, keySecret, new RestTemplate());
     }
 
