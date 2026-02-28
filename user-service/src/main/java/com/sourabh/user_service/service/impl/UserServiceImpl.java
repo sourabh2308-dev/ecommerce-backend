@@ -235,10 +235,16 @@ public class UserServiceImpl implements UserService {
         if (existingUserOptional.isPresent()) {
             User existingUser = existingUserOptional.get();
 
-            if (existingUser.isEmailVerified() && existingUser.getStatus() != UserStatus.PENDING_VERIFICATION) {
+            // if the record isn't soft-deleted and the email is already verified
+            // in a non-pending state we consider the address taken.
+            if (!existingUser.isDeleted()
+                    && existingUser.isEmailVerified()
+                    && existingUser.getStatus() != UserStatus.PENDING_VERIFICATION) {
                 throw new UserAlreadyExistsException("Email already registered");
             }
 
+            // Reset state for deleted or unverified users so the row can be reused
+            existingUser.setDeleted(false);
             existingUser.setFirstName(request.getFirstName());
             existingUser.setLastName(request.getLastName());
             existingUser.setPhoneNumber(request.getPhoneNumber());
@@ -247,7 +253,6 @@ public class UserServiceImpl implements UserService {
             existingUser.setStatus(UserStatus.PENDING_VERIFICATION);
             existingUser.setEmailVerified(false);
             existingUser.setApproved(false);
-            existingUser.setDeleted(false);
 
             User updatedUser = userRepository.save(existingUser);
             generateAndSendOTP(updatedUser, OTPType.EMAIL);

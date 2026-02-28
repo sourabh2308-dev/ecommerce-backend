@@ -8,18 +8,19 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@SpringBootTest
-@Testcontainers
+@SpringBootTest(
+    properties = {
+        // override datasource for in-memory testing
+        "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1",
+        "spring.datasource.driverClassName=org.h2.Driver",
+        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
+        // auto-create schema so tables such as refresh_token exist
+        "spring.jpa.hibernate.ddl-auto=create-drop"
+    }
+)
 class AuthServiceApplicationTests {
 
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
-
-    @SuppressWarnings("resource")
-    @Container
-    @ServiceConnection
-    static GenericContainer<?> redis = new GenericContainer<>("redis:7").withExposedPorts(6379);
+    // using H2; no containers needed
 
     @Test
     void contextLoads() {

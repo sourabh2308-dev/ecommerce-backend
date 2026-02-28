@@ -21,4 +21,13 @@ public interface PaymentService {
 
     /** Admin financial dashboard */
     AdminDashboardResponse getAdminDashboard();
+
+    /**
+     * Handle asynchronous notification from a payment gateway (webhook).
+     *
+     * @param orderUuid provider order identifier matching our order
+     * @param success   true if the payment succeeded
+     * @param gatewayResponse additional provider-specific string (e.g. paymentId)
+     */
+    void handleGatewayCallback(String orderUuid, boolean success, String gatewayResponse);
 }

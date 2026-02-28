@@ -1,0 +1,2 @@
+-- payment-service: unified schema for JPA auto-creation
+-- This file is for documentation only; JPA will create the schema.

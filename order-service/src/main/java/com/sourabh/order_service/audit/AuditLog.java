@@ -50,6 +50,7 @@ public class AuditLog {
     @Column(length = 2000)
     private String changeData;
 
+    @Column(nullable = false)
     private String ipAddress;
 
     @Column(nullable = false)

@@ -33,7 +33,7 @@ public class AuditAspect {
             Object[] args = joinPoint.getArgs();
             String resourceId = extractResourceId(args, auditable);
 
-            AuditLog auditLog = AuditLog.builder()
+                AuditLog auditLog = AuditLog.builder()
                     .action(auditable.action())
                     .actorUuid(actorUuid)
                     .actorRole(actorRole)
@@ -41,6 +41,7 @@ public class AuditAspect {
                     .resourceId(resourceId)
                     .ipAddress(ipAddress)
                     .details(joinPoint.getSignature().getName())
+                    .changeData(null) // Set to null or provide actual change data if available
                     .build();
 
             auditLogRepository.save(auditLog);

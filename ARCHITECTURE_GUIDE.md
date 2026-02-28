@@ -196,6 +196,9 @@ This is a **fully scalable, production-ready e-commerce microservices backend** 
   - `GET /api/order/{uuid}/shipment-tracking` - Get delivery location
   - `POST /api/order/{uuid}/shipment-event` - Log shipment event
   - `GET /api/order/{uuid}/invoice` - Get order invoice PDF
+  - `GET /api/order/{uuid}/invoice/email` - Email invoice to buyer (generates PDF and requests user-service to send it)
+
+**Automatic Delivery:** order-service emits `order.status.changed` Kafka events. user-service consumes and when status becomes `DELIVERED` it calls `/api/order/internal/{uuid}/invoice` to fetch the PDF bytes and then emails the invoice as an attachment to the buyer.
   - `GET /api/order/{uuid}/invoice/email` - Email invoice to buyer
   - `GET /api/order/dashboard` - Buyer's order analytics
   - `GET /api/admin/dashboard/orders` - Admin order analytics
@@ -416,6 +419,9 @@ CLIENT (Buyer)
            ├─ Create Payment entity {uuid, orderUuid, amount, status: INITIATED}
            ├─ Simulate payment gateway (100% success for demo)
            ├─ Update Payment {status: SUCCESS} (or FAILED randomly)
+           ├─ When running with a real gateway the service returns a provider order
+           │  id (e.g. Razorpay).  The frontend then invokes the checkout widget
+           │  using that id; callback/webhook updates the status asynchronously.
            ├─ Create PaymentSplit entries per seller
            │  ├─ Seller amount = (orderAmount - fees) * seller_ratio
            │  ├─ Platform commission = amount * 10%

@@ -9,6 +9,8 @@ import com.sourabh.order_service.entity.Order;
 import com.sourabh.order_service.entity.OrderItem;
 import com.sourabh.order_service.repository.OrderRepository;
 import com.sourabh.order_service.service.InvoiceService;
+import com.sourabh.order_service.dto.InternalUserDto;
+import com.sourabh.order_service.dto.InvoiceEmailRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -80,6 +82,7 @@ import java.io.ByteArrayOutputStream;
 public class InvoiceServiceImpl implements InvoiceService {
 
     private final OrderRepository orderRepository;
+    private final com.sourabh.order_service.feign.UserServiceClient userServiceClient;
 
     private static final Font TITLE_FONT = new Font(Font.HELVETICA, 18, Font.BOLD, new Color(79, 70, 229));
     private static final Font HEADER_FONT = new Font(Font.HELVETICA, 11, Font.BOLD, Color.WHITE);
@@ -221,6 +224,33 @@ public class InvoiceServiceImpl implements InvoiceService {
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to generate invoice PDF", e);
+        }
+    }
+
+    @Override
+    public void emailInvoice(String orderUuid) {
+        Order order = orderRepository.findByUuidAndIsDeletedFalse(orderUuid)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        // generate bytes (reuse existing logic)
+        byte[] pdf = generateInvoice(orderUuid);
+
+        // fetch buyer email from user-service
+        InternalUserDto user = userServiceClient.getUserByUuid(order.getBuyerUuid());
+        if (user == null || user.getEmail() == null) {
+            throw new RuntimeException("Buyer email not available");
+        }
+
+        String base64 = java.util.Base64.getEncoder().encodeToString(pdf);
+        InvoiceEmailRequest req = InvoiceEmailRequest.builder()
+                        .orderUuid(orderUuid)
+                        .toEmail(user.getEmail())
+                        .pdfBase64(base64)
+                        .build();
+        try {
+            userServiceClient.sendInvoice(req);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to request invoice email", e);
         }
     }
 

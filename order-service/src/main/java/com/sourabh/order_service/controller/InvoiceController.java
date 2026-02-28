@@ -66,4 +66,28 @@ public class InvoiceController {
                 .contentLength(pdf.length)
                 .body(pdf);
     }
+
+    /**
+     * Send invoice PDF via email to the buyer.
+     * This triggers internal logic which generates the document and
+     * delegates delivery to the user-service.
+     */
+    @PreAuthorize("hasAnyRole('BUYER','SELLER','ADMIN')")
+    @GetMapping("/{orderUuid}/invoice/email")
+    public ResponseEntity<String> emailInvoice(@PathVariable String orderUuid) {
+        invoiceService.emailInvoice(orderUuid);
+        return ResponseEntity.ok("Invoice email requested");
+    }
+
+    /**
+     * Internal endpoint used by other services to fetch raw PDF bytes.
+     * This bypasses role-based security and is protected only by the
+     * X-Internal-Secret header handled by InternalSecretFilter.
+     */
+    @GetMapping("/internal/{orderUuid}/invoice")
+    public ResponseEntity<byte[]> downloadInvoiceInternal(
+            @PathVariable String orderUuid) {
+        byte[] pdf = invoiceService.generateInvoice(orderUuid);
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).body(pdf);
+    }
 }

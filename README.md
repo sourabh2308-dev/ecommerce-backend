@@ -23,7 +23,7 @@ This repository now includes comprehensive features for a full-featured e-commer
 - **🎟️ Coupons & Discounts** - Flexible discount campaigns
 - **↩️ Returns & Exchanges** - Complete return workflow
 - **📦 Shipment Tracking** - Real-time delivery tracking
-- **📄 Invoice Generation** - PDF invoice downloads
+- **📄 Invoice Generation** - PDF invoice downloads, email delivery on demand, and automatic invoice email when an order is marked delivered
 - **📊 Business Dashboards** - Admin and seller analytics
 - **📝 Audit Logs** - Complete compliance trail
 - **🏷️ Product Categories** - Hierarchical catalog organization
@@ -380,7 +380,7 @@ http://localhost:8080
 
 | Service | Endpoints | Details |
 |---------|-----------|---------|
-| **Auth** | login, refresh, logout, forgot-password, reset-password | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-auth-service---jwt-management) |
+| **Auth** | login, refresh, logout, forgot-password, reset-password (OTP-based) | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-auth-service---jwt-management) |
 | **User** | register, verify-otp, profile, addresses, cart, wishlist, notifications, loyalty, support | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-user-service---profile--registration) |
 | **Product** | create, search, categories, images, variants, flash-deals, inventory | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-product-service---catalog-management) |
 | **Order** | create, list, coupons, returns, tracking, invoice, audit, dashboards | See [API_DOCUMENTATION.md](API_DOCUMENTATION.md#-order-service---order-processing) |
@@ -432,10 +432,10 @@ From `AuthController`:
 From `UserController`:
 
 Public:
-- `POST /api/user/register`
+- `POST /api/user/register` (emails from deleted accounts may be reused)
 - `POST /api/user/verify-otp`
 - `POST /api/user/resend-otp?email=...`
-- `POST /api/user/forgot-password`
+- `POST /api/auth/forgot-password`
 - `POST /api/user/reset-password`
 
 Authenticated user:

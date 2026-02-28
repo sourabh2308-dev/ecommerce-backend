@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/payment")
@@ -161,6 +162,32 @@ public class PaymentController {
             HttpServletRequest httpRequest) {
         String sellerUuid = httpRequest.getHeader("X-User-UUID");
         return ResponseEntity.ok(paymentService.getSellerDashboard(sellerUuid));
+    }
+
+    // =========================
+    // PAYMENT GATEWAY CALLBACK (public URL, not auth-protected)
+    // =========================
+    @PostMapping("/gateway/webhook")
+    public ResponseEntity<Void> gatewayWebhook(
+            @RequestBody Map<String, Object> payload,
+            @RequestHeader(value = "X-Razorpay-Signature", required = false) String signature) {
+        // only Razorpay sends this header; other gateways may use different names
+        String orderId = (String) payload.get("razorpay_order_id");
+        String paymentId = (String) payload.get("razorpay_payment_id");
+        String status = (String) payload.get("status");
+
+        boolean verified = true;
+        if (signature != null) {
+            verified = paymentService instanceof com.sourabh.payment_service.service.impl.PaymentServiceImpl ?
+                    ((com.sourabh.payment_service.service.impl.PaymentServiceImpl) paymentService)
+                            .getPaymentGateway().verify(orderId, paymentId, signature)
+                    : true;
+        }
+        if (verified) {
+            boolean success = "captured".equalsIgnoreCase(status) || "success".equalsIgnoreCase(status);
+            paymentService.handleGatewayCallback(orderId, success, paymentId);
+        }
+        return ResponseEntity.ok().build();
     }
 
     // =========================

@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.Map;
 import java.util.Optional;
@@ -26,6 +27,10 @@ public class OrderEventConsumer {
     private final NotificationService notificationService;
     private final EmailService emailService;
     private final UserRepository userRepository;
+    private final com.sourabh.user_service.feign.OrderServiceClient orderServiceClient;
+
+    @Value("${internal.secret}")
+    private String internalSecret;
 
     private static final Map<String, NotificationType> STATUS_TO_TYPE = Map.of(
             "CONFIRMED", NotificationType.ORDER_CONFIRMED,
@@ -92,6 +97,18 @@ public class OrderEventConsumer {
             );
             emailService.sendHtmlEmail(user.getEmail(), title, htmlBody);
             log.info("Order status email sent to {}", user.getEmail());
+
+            // when delivered, automatically send the invoice attachment
+            if ("DELIVERED".equals(event.getNewStatus())) {
+                try {
+                    byte[] pdf = orderServiceClient.getInvoice(event.getOrderUuid(), internalSecret);
+                    String base64 = java.util.Base64.getEncoder().encodeToString(pdf);
+                    emailService.sendInvoiceEmail(user.getEmail(), event.getOrderUuid(), base64);
+                    log.info("Invoice attached email sent to {}", user.getEmail());
+                } catch (Exception ex) {
+                    log.error("Failed to fetch/send invoice for {}: {}", event.getOrderUuid(), ex.getMessage());
+                }
+            }
         } catch (Exception e) {
             log.error("Failed to send order email to {}: {}", user.getEmail(), e.getMessage());
         }

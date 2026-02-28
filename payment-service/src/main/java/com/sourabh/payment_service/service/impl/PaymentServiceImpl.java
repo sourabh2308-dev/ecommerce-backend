@@ -10,6 +10,7 @@ import com.sourabh.payment_service.exception.PaymentAccessException;
 import com.sourabh.payment_service.exception.PaymentNotFoundException;
 import com.sourabh.payment_service.kafka.event.PaymentCompletedEvent;
 import com.sourabh.payment_service.repository.PaymentRepository;
+import com.sourabh.payment_service.gateway.PaymentGateway;
 import com.sourabh.payment_service.repository.PaymentSplitRepository;
 import com.sourabh.payment_service.service.PaymentService;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +48,10 @@ import java.util.UUID;
  * 1. Payment Initiation:
  *    - Process payment requests from buyers
  *    - Calculate total amount: (item prices + delivery fees + platform commission)
- *    - Simulate payment gateway integration (in production: Stripe, PayPal, Razorpay)
+ *    - Delegate to a configurable payment gateway implementation (mock by default,
+ *      or Razorpay sandbox when enabled) rather than hard‑coded simulation.  This
+ *      abstraction makes end-to-end tests with a free Razorpay test account
+ *      possible.
  *    - Create Payment entity with status PENDING
  * 
  * 2. Revenue Split Calculation:
@@ -255,6 +259,8 @@ public class PaymentServiceImpl implements PaymentService {
 
     private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
 
+    private final PaymentGateway paymentGateway; // new dependency
+
     // ─────────────────────────────────────────────
     // INITIATE PAYMENT (Buyer manual flow)
     // ─────────────────────────────────────────────
@@ -287,9 +293,20 @@ public class PaymentServiceImpl implements PaymentService {
 
         paymentRepository.save(payment);
 
-        // Simulate payment gateway (100% success for demo)
-        boolean success = true; // Changed from Math.random() > 0.2 for reliable demo
-        PaymentStatus finalStatus = success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
+        // delegate to gateway
+        String gatewayResult = paymentGateway.initiate(request.getAmount(), "INR", paymentUuid);
+
+        // interpret result
+        PaymentStatus finalStatus;
+        if (gatewayResult.startsWith("Payment SUCCESS")) {
+            finalStatus = PaymentStatus.SUCCESS;
+        } else if (gatewayResult.startsWith("Payment FAILED")) {
+            finalStatus = PaymentStatus.FAILED;
+        } else {
+            // assume external order id (e.g. Razorpay) -> leave pending
+            finalStatus = PaymentStatus.PENDING;
+        }
+
         payment.setStatus(finalStatus);
         paymentRepository.save(payment);
 
@@ -299,7 +316,34 @@ public class PaymentServiceImpl implements PaymentService {
                 new PaymentCompletedEvent(request.getOrderUuid(), finalStatus.name(), paymentUuid));
 
         log.info("PaymentCompletedEvent published: orderUuid={}, status={}", request.getOrderUuid(), finalStatus);
-        return "Payment " + finalStatus.name();
+        return gatewayResult;
+    }
+
+    // ─────────────────────────────────────────────
+    // GATEWAY CALLBACK HANDLING
+    // ─────────────────────────────────────────────
+
+    @Override
+    public void handleGatewayCallback(String orderUuid, boolean success, String gatewayResponse) {
+        Payment payment = paymentRepository.findByOrderUuid(orderUuid)
+                .orElseThrow(() -> new PaymentNotFoundException("No payment for order " + orderUuid));
+
+        PaymentStatus finalStatus = success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
+        payment.setStatus(finalStatus);
+        paymentRepository.save(payment);
+
+        log.info("[GATEWAY CALLBACK] order={}, success={}, response={}", orderUuid, success, gatewayResponse);
+
+        kafkaTemplate.send(TOPIC_PAYMENT_COMPLETED,
+                new PaymentCompletedEvent(orderUuid, finalStatus.name(), payment.getUuid()));
+    }
+
+    /**
+     * Exposed for controller verification; callers should prefer using the
+     * dedicated callback handler instead.
+     */
+    public PaymentGateway getPaymentGateway() {
+        return paymentGateway;
     }
 
     // ─────────────────────────────────────────────

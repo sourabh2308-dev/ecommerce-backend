@@ -1,0 +1,16 @@
+ email_verified | boolean
+ is_approved    | boolean
+ is_deleted     | boolean
+ created_at     | timestamp without time zone
+ id             | bigint
+ last_login_at  | timestamp without time zone
+ updated_at     | timestamp without time zone
+ phone_number   | character varying
+ email          | character varying
+ first_name     | character varying
+ last_name      | character varying
+ password       | character varying
+ role           | character varying
+ status         | character varying
+ uuid           | character varying
+

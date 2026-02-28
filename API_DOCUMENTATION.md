@@ -170,6 +170,10 @@ POST /api/user/register
 Content-Type: application/json
 Authorization: (not required)
 
+> **Note:** if an account previously existed with the same email but was soft‑deleted,
+> the address may be reused; the service will restore the record and restart
+> verification.
+
 Request Body:
 {
   "email": "newuser@example.com",
@@ -348,7 +352,7 @@ Next Steps:
 
 #### 6. Forgot Password
 ```http
-POST /api/user/forgot-password
+POST /api/auth/forgot-password
 Content-Type: application/json
 Authorization: (not required)
 
@@ -359,7 +363,7 @@ Request Body:
 
 Response (200 OK):
 {
-  "message": "Password reset link sent to your email",
+  "message": "If the email exists, a password reset OTP has been sent.",
   "email": "user@example.com"
 }
 
@@ -368,7 +372,7 @@ Behavior:
 - User clicks link in email
 - Frontend redirects to reset password page with token
 - User enters new password
-- Call POST /api/user/reset-password with token
+- Call POST /api/auth/reset-password with email, OTP code and new password (OTP supplied by email)
 
 Errors:
 - 404 Not Found: Email not registered

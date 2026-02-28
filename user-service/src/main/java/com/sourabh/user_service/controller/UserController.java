@@ -4,6 +4,8 @@ import com.sourabh.user_service.common.ApiResponse;
 import com.sourabh.user_service.common.PageResponse;
 import com.sourabh.user_service.dto.request.*;
 import com.sourabh.user_service.dto.response.InternalUserDto;
+import com.sourabh.user_service.dto.InvoiceEmailRequest;
+import com.sourabh.user_service.service.EmailService;
 import com.sourabh.user_service.dto.response.SellerDetailResponse;
 import com.sourabh.user_service.dto.response.UserResponse;
 import com.sourabh.user_service.service.UserService;
@@ -165,6 +167,7 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
 
     private final UserService userService;
+    private final EmailService emailService;
 
     // ─────────────────────────────────────────────
     // PUBLIC ROUTES (no JWT required)
@@ -611,6 +614,22 @@ public class UserController {
         log.debug("Internal lookup by uuid={}", uuid);
         InternalUserDto dto = userService.getUserByUuidInternal(uuid);
         return dto != null ? ResponseEntity.ok(dto) : ResponseEntity.notFound().build();
+    }
+
+    @PostMapping("/internal/invoice")
+    /**
+     * SENDINVOICEINTERNAL - Method Documentation
+     *
+     * PURPOSE:
+     * Receives a base64-encoded invoice PDF and sends it to the given email
+     * address. This endpoint is used by other microservices (order-service)
+     * for inter-service communication only.
+     *
+     */
+    public ResponseEntity<ApiResponse<String>> sendInvoiceInternal(@RequestBody InvoiceEmailRequest req) {
+        log.debug("Internal invoice email request to={} order={}", req.getToEmail(), req.getOrderUuid());
+        emailService.sendInvoiceEmail(req.getToEmail(), req.getOrderUuid(), req.getPdfBase64());
+        return ResponseEntity.ok(ApiResponse.success("sent", null));
     }
 
     // ─────────────────────────────────────────────

@@ -8,18 +8,18 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@SpringBootTest(properties = "spring.kafka.listener.auto-startup=false")
-@Testcontainers
+@SpringBootTest(
+    properties = {
+        "spring.kafka.listener.auto-startup=false",
+        // use H2 in-memory database for tests instead of external containers
+        "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1",
+        "spring.datasource.driverClassName=org.h2.Driver",
+        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect"
+    }
+)
 class UserServiceApplicationTests {
 
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
-
-    @SuppressWarnings("resource")
-    @Container
-    @ServiceConnection
-    static GenericContainer<?> redis = new GenericContainer<>("redis:7").withExposedPorts(6379);
+    // no containers required – the in-memory H2 DB will satisfy the context
 
     @Test
     void contextLoads() {

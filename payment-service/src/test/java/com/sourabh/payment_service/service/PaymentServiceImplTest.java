@@ -30,6 +30,7 @@ class PaymentServiceImplTest {
 
     @Mock private PaymentRepository paymentRepository;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private com.sourabh.payment_service.gateway.PaymentGateway paymentGateway;
 
     @InjectMocks
     private PaymentServiceImpl paymentService;
@@ -41,6 +42,8 @@ class PaymentServiceImplTest {
         validRequest = new PaymentRequest();
         validRequest.setOrderUuid("order-uuid");
         validRequest.setAmount(250.00);
+        lenient().when(paymentGateway.initiate(anyDouble(), anyString(), anyString()))
+                .thenReturn("Payment SUCCESS");
     }
 
     @Test
@@ -137,5 +140,40 @@ class PaymentServiceImplTest {
         verify(kafkaTemplate).send(eq("payment.completed"), eventCaptor.capture());
 
         assertThat(eventCaptor.getValue().getOrderUuid()).isEqualTo("special-order-123");
+    }
+
+    @Test
+    @DisplayName("initiatePayment: uses gateway and handles pending response")
+    void initiatePayment_gatewayPendingLeadsToPendingStatus() {
+        when(paymentGateway.initiate(anyDouble(), anyString(), anyString()))
+                .thenReturn("razorpay_order_12345");
+        when(paymentRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        String result = paymentService.initiatePayment(validRequest, "BUYER", "buyer-uuid");
+        assertThat(result).isEqualTo("razorpay_order_12345");
+
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository, atLeastOnce()).save(captor.capture());
+        Payment saved = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertThat(saved.getStatus()).isEqualTo(PaymentStatus.PENDING);
+
+        verify(paymentGateway).initiate(eq(250.00), eq("INR"), anyString());
+    }
+
+    @Test
+    @DisplayName("handleGatewayCallback: updates status and publishes event")
+    void handleGatewayCallback_updatesAndPublishes() {
+        Payment existing = Payment.builder()
+                .uuid("pay-1")
+                .orderUuid("order-123")
+                .status(PaymentStatus.PENDING)
+                .build();
+        when(paymentRepository.findByOrderUuid("order-123")).thenReturn(java.util.Optional.of(existing));
+        when(paymentRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        paymentService.handleGatewayCallback("order-123", true, "pay-abc");
+
+        assertThat(existing.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(kafkaTemplate).send(eq("payment.completed"), any());
     }
 }

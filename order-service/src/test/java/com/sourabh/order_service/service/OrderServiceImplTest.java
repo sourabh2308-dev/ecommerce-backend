@@ -214,6 +214,30 @@ class OrderServiceImplTest {
                 .hasMessageContaining("Invalid transition");
     }
 
+    @Test
+    @DisplayName("updateOrderStatus: seller can advance CONFIRMED→SHIPPED and SHIPPED→DELIVERED")
+    void sellerShippingFlow() {
+        sampleOrder.setStatus(OrderStatus.CONFIRMED);
+        when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid")).thenReturn(Optional.of(sampleOrder));
+        when(orderRepository.save(any())).thenReturn(sampleOrder);
+        OrderResponse r1 = orderService.updateOrderStatus("order-uuid", "SELLER", "seller-uuid", "SHIPPED", null, null);
+        assertThat(r1.getStatus()).isEqualTo("SHIPPED");
+
+        sampleOrder.setStatus(OrderStatus.SHIPPED);
+        OrderResponse r2 = orderService.updateOrderStatus("order-uuid", "SELLER", "seller-uuid", "DELIVERED", null, null);
+        assertThat(r2.getStatus()).isEqualTo("DELIVERED");
+    }
+
+    @Test
+    @DisplayName("updateOrderStatus: admin can issue REFUND_ISSUED after RETURN_RECEIVED")
+    void adminRefunds() {
+        sampleOrder.setStatus(OrderStatus.RETURN_RECEIVED);
+        when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid")).thenReturn(Optional.of(sampleOrder));
+        when(orderRepository.save(any())).thenReturn(sampleOrder);
+        OrderResponse r = orderService.updateOrderStatus("order-uuid", "ADMIN", null, "REFUND_ISSUED", null, null);
+        assertThat(r.getStatus()).isEqualTo("REFUND_ISSUED");
+    }
+
     // ──────────────────────────────────────────────────────
     // updatePaymentStatus
     // ──────────────────────────────────────────────────────

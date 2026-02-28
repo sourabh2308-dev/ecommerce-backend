@@ -70,6 +70,32 @@ public class EmailServiceImpl implements EmailService {
         }
     }
 
+    @Override
+    @Async
+    public void sendInvoiceEmail(String toEmail, String orderUuid, String pdfBase64) {
+        try {
+            byte[] pdfBytes = pdfBase64 != null ? java.util.Base64.getDecoder().decode(pdfBase64) : new byte[0];
+
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom(fromAddress, fromName);
+            helper.setTo(toEmail);
+            helper.setSubject("Invoice for order " + orderUuid);
+            helper.setText("Please find attached your invoice.", true);
+
+            if (pdfBytes.length > 0) {
+                helper.addAttachment("invoice-" + orderUuid + ".pdf",
+                        new jakarta.mail.util.ByteArrayDataSource(pdfBytes, "application/pdf"));
+            }
+
+            mailSender.send(message);
+            log.info("[EMAIL] Invoice email sent to {} for order {} ({} bytes)",
+                    toEmail, orderUuid, pdfBytes.length);
+        } catch (Exception ex) {
+            log.error("[EMAIL] Failed to send invoice email to {}: {}", toEmail, ex.getMessage(), ex);
+        }
+    }
+
     // ─── Private helpers ──────────────────────────────────────────────────
 
     private String buildOtpHtml(String userName, String otpCode, String subject) {
