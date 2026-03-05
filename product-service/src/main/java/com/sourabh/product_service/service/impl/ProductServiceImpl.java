@@ -28,220 +28,47 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Implementation of {@link ProductService} — the central business-logic layer
+ * for the product catalog in the e-commerce platform.
+ *
+ * <p>Responsibilities include:</p>
+ * <ul>
+ *   <li>Full product lifecycle: create (DRAFT), approve (ACTIVE), block, unblock, soft-delete</li>
+ *   <li>Inventory management: reduce / restore stock with automatic status transitions</li>
+ *   <li>Role-aware listing and search (BUYER, SELLER, ADMIN)</li>
+ *   <li>Rating aggregation triggered by Kafka review events</li>
+ *   <li>Redis-backed caching with eviction on mutation</li>
+ *   <li>Elasticsearch indexing via {@link ProductSearchService}</li>
+ * </ul>
+ *
+ * <p>Stock mutations ({@code reduceStock}, {@code restoreStock}) are invoked
+ * synchronously by order-service through Feign and participate in the
+ * saga-based order/payment workflow.</p>
+ *
+ * @see ProductService
+ * @see ProductRepository
+ * @see ProductSearchService
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
-/**
- * ═══════════════════════════════════════════════════════════════════════════
- * PRODUCT SERVICE IMPLEMENTATION - Product Catalog & Inventory Management
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Core business logic for managing product lifecycle: creation, updates, inventory,
- * status transitions, and multi-criteria search. Serves as the central product catalog
- * for the e-commerce platform with real-time inventory tracking and caching.
- * 
- * KEY RESPONSIBILITIES:
- * --------------------
- * 1. Product Catalog Management:
- *    - Create products (SELLER only)
- *    - Update product details (name, description, price, category)
- *    - Soft delete products (isDeleted flag)
- *    - Status transitions: PENDING → ACTIVE → OUT_OF_STOCK → INACTIVE
- * 
- * 2. Inventory Management:
- *    - Track stock quantity in real-time
- *    - Reduce stock on order placement (synchronous Feign call from order-service)
- *    - Restore stock on order cancellation/payment failure (compensation)
- *    - Prevent overselling with optimistic locking or validation
- * 
- * 3. Authorization & Ownership:
- *    - Validate seller ownership before updates/deletes
- *    - Only product owner can modify their products
- *    - Admins can view/manage all products
- * 
- * 4. Search & Filtering:
- *    - Multi-criteria search: category, status, price range, seller
- *    - Pagination for large result sets
- *    - Sorting by price, name, createdAt
- * 
- * 5. Caching Strategy:
- *    - Cache individual product lookups (high read frequency)
- *    - Cache product lists by seller
- *    - Evict cache on updates to ensure consistency
- *    - Redis-backed distributed cache
- * 
- * ARCHITECTURE PATTERNS:
- * ----------------------
- * - Service Layer Pattern: Business logic separated from controllers
- * - Repository Pattern: JPA abstracts database access
- * - DTO Pattern: Entity → Response DTO conversion (hide internal fields)
- * - Cache-Aside Pattern: @Cacheable + @CacheEvict for performance
- * - Optimistic Concurrency: Prevent race conditions in stock updates
- * - Specification Pattern: Dynamic JPA Criteria queries for flexible filtering
- * 
- * ANNOTATIONS EXPLAINED:
- * ----------------------
- * @Service:
- *   - Marks as Spring-managed service bean
- *   - Auto-detected during component scanning
- *   - Eligible for dependency injection
- * 
- * @Transactional:
- *   - Wraps method in database transaction
- *   - Auto-rollback on unchecked exceptions
- *   - Ensures atomicity of multi-step operations
- *   - Default: PROPAGATION_REQUIRED, ISOLATION_DEFAULT
- * 
- * @Cacheable("productsCache", key = "#uuid"):
- *   - Caches method result with key: productsCache::{uuid}
- *   - Subsequent calls return cached value (no DB query)
- *   - TTL configured in RedisCacheConfig (e.g., 30 minutes)
- * 
- * @CacheEvict:
- *   - Removes cache entries on data modification
- *   - allEntries = true: Clears entire cache
- *   - Used after create/update/delete to prevent stale data
- * 
- * BUSINESS RULES:
- * ---------------
- * 1. Stock Management:
- *    - reduceStock: Decrease quantity, set OUT_OF_STOCK if quantity = 0
- *    - restoreStock: Increase quantity, set ACTIVE if was OUT_OF_STOCK
- *    - Cannot reduce stock below 0 (throws ProductStateException)
- * 
- * 2. Product Status Transitions:
- *    - PENDING: Initial state after creation (awaiting approval)
- *    - ACTIVE: Available for purchase (quantity > 0)
- *    - OUT_OF_STOCK: No inventory available (quantity = 0)
- *    - INACTIVE: Seller disabled the product
- * 
- * 3. Authorization Rules:
- *    - Only product owner (seller) can update/delete
- *    - Admins can view all products
- *    - Buyers can only view ACTIVE products
- * 
- * 4. Pricing Rules:
- *    - Price must be > 0
- *    - Discount price must be < original price (if provided)
- *    - Price update triggers cache eviction
- * 
- * ERROR HANDLING:
- * ---------------
- * Custom exceptions for business rule violations:
- * - ProductNotFoundException: Product UUID not found
- * - UnauthorizedProductAccessException: Seller not owner of product
- * - ProductStateException: Invalid state transition or insufficient stock
- * 
- * CACHING STRATEGY:
- * -----------------
- * Cache Keys:
- * - Single product: productsCache::{uuid}
- * - Seller products: productsCache::seller:{sellerUuid}
- * - Search results: Not cached (too many permutations)
- * 
- * Cache Eviction:
- * - Create product: Evict seller products cache
- * - Update product: Evict product UUID + seller products cache
- * - Delete product: Evict product UUID + seller products cache
- * - Stock change: Evict product UUID cache
- * 
- * TTL Configuration:
- * - Product details: 30 minutes (balances freshness and performance)
- * - Seller product lists: 15 minutes (more frequent changes)
- * 
- * INTERNAL API (Feign Clients):
- * ------------------------------
- * These methods are called by other microservices via Feign:
- * 
- * 1. getProductByUuid(uuid):
- *    - Called by: order-service, review-service
- *    - Purpose: Fetch product details during order/review creation
- *    - Returns: ProductDto with full product info
- * 
- * 2. reduceStock(uuid, quantity):
- *    - Called by: order-service during order creation
- *    - Purpose: Decrease inventory when order placed
- *    - Returns: Success message or throws ProductStateException
- * 
- * 3. restoreStock(uuid, quantity):
- *    - Called by: order-service during order cancellation
- *    - Purpose: Compensation logic to return stock
- *    - Returns: Success message
- * 
- * EXAMPLE FLOWS:
- * --------------
- * 
- * Flow 1: Create Product
- * createProduct(request, sellerUuid)
- * → Validate request (price > 0, name not empty)
- * → Create Product entity (status = PENDING, isDeleted = false)
- * → Set sellerUuid, createdAt, updatedAt
- * → Save to database
- * → Evict seller products cache
- * → Convert to ProductResponse
- * → Return ProductResponse
- * 
- * Flow 2: Reduce Stock (Called by order-service)
- * reduceStock(productUuid, quantity)
- * → Fetch product by UUID (throw ProductNotFoundException if not found)
- * → Check product.quantity >= quantity (throw ProductStateException if insufficient)
- * → Decrease product.quantity by quantity
- * → If quantity becomes 0: Set status = OUT_OF_STOCK
- * → Save product
- * → Evict product cache
- * → Return success message
- * 
- * Flow 3: Search Products with Filters
- * searchProducts(category, minPrice, maxPrice, status, page, size)
- * → Build JPA Specification with dynamic filters:
- *    - category EQUALS provided value (if not null)
- *    - price BETWEEN minPrice AND maxPrice (if provided)
- *    - status EQUALS provided value (if not null)
- *    - isDeleted = false (always)
- * → Create Pageable (page, size, sort by createdAt DESC)
- * → Execute: productRepository.findAll(spec, pageable)
- * → Convert Page<Product> to Page<ProductResponse>
- * → Wrap in PageResponse<ProductResponse>
- * → Return PageResponse
- * 
- * Flow 4: Update Product with Cache Eviction
- * updateProduct(uuid, request, sellerUuid)
- * → Fetch product by UUID
- * → Validate seller ownership (product.sellerUuid == sellerUuid)
- * → Update allowed fields (name, description, price, category)
- * → Set updatedAt = now
- * → Save product
- * → Evict caches: product UUID + seller products list
- * → Convert to ProductResponse
- * → Return ProductResponse
- * 
- * TESTING NOTES:
- * --------------
- * - Mock ProductRepository in unit tests
- * - Test cache behavior with @MockBean CacheManager
- * - Verify authorization with different seller UUIDs
- * - Test stock edge cases: reduce to 0, restore from 0, reduce below 0
- * - Test Specification queries with various filter combinations
- */
 public class ProductServiceImpl implements ProductService {
 
+    /** JPA repository for product persistence and specification-based queries. */
     private final ProductRepository productRepository;
+
+    /** Elasticsearch indexing service for full-text product search. */
     private final ProductSearchService productSearchService;
 
-    // ===============================
-    // CREATE PRODUCT
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Builds a new {@link Product} entity in DRAFT status, persists it,
+     * and indexes it in Elasticsearch for full-text search.</p>
+     */
     @Override
     @Transactional
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public ProductResponse createProduct(CreateProductRequest request, String sellerUuid) {
 
         Product product = Product.builder()
@@ -265,10 +92,13 @@ public class ProductServiceImpl implements ProductService {
         return mapToResponse(product);
     }
 
-    // ===============================
-    // UPDATE PRODUCT
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Sellers may only update their own non-blocked products. Null fields
+     * in the request are ignored (partial update). Stock changes trigger
+     * automatic status transitions between ACTIVE and OUT_OF_STOCK.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#uuid")
@@ -325,17 +155,15 @@ public class ProductServiceImpl implements ProductService {
 
         return mapToResponse(product);
     }
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Transitions the product from DRAFT to ACTIVE so it becomes
+     * visible to buyers.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#uuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String approveProduct(String uuid) {
 
         Product product = productRepository
@@ -349,19 +177,14 @@ public class ProductServiceImpl implements ProductService {
         return "Product approved";
     }
 
-    // ===============================
-    // BLOCK PRODUCT (ADMIN)
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Sets the product status to BLOCKED, preventing purchase.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#uuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String blockProduct(String uuid) {
 
         Product product = productRepository
@@ -375,19 +198,15 @@ public class ProductServiceImpl implements ProductService {
         return "Product blocked";
     }
 
-    // ===============================
-    // UNBLOCK PRODUCT (ADMIN)
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Only applicable when the product is currently BLOCKED. Resets
+     * the status to DRAFT so the seller must resubmit for approval.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#uuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String unblockProduct(String uuid) {
 
         Product product = productRepository
@@ -397,7 +216,6 @@ public class ProductServiceImpl implements ProductService {
         if (product.getStatus() != ProductStatus.BLOCKED) {
             throw new ProductStateException("Product is not blocked");
         }
-        // Return to DRAFT so seller must resubmit for approval
         product.setStatus(ProductStatus.DRAFT);
         productRepository.save(product);
 
@@ -405,10 +223,12 @@ public class ProductServiceImpl implements ProductService {
         return "Product unblocked and set back to DRAFT for re-approval";
     }
 
-    // ===============================
-    // SOFT DELETE
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Marks the product as deleted and removes it from the
+     * Elasticsearch index. Sellers may only delete their own products.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#uuid")
@@ -434,10 +254,13 @@ public class ProductServiceImpl implements ProductService {
         return "Product deleted";
     }
 
-    // ===============================
-    // LIST PRODUCTS
-    // ===============================
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Builds JPA Specification predicates dynamically based on the
+     * caller's role and an optional keyword filter that matches against
+     * name, description, and category.</p>
+     */
     @Override
     public PageResponse<ProductResponse> listProducts(
             int page,
@@ -504,15 +327,14 @@ public class ProductServiceImpl implements ProductService {
                 .build();
     }
 
-    // ===============================
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Result is cached in Redis under the {@code products} cache region.
+     * Buyers and unauthenticated callers only receive ACTIVE products.</p>
+     */
     @Override
     @Cacheable(value = "products", key = "#uuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public ProductResponse getProductByUuid(String uuid, String role) {
         log.debug("Cache miss for product uuid={} — fetching from DB", uuid);
         Product product = productRepository
@@ -528,21 +350,12 @@ public class ProductServiceImpl implements ProductService {
         return mapToResponse(product);
     }
 
-    // HELPER METHODS
-    // ===============================
-
     /**
-     * MAPTORESPONSE - Method Documentation
+     * Converts a {@link Product} entity into a {@link ProductResponse} DTO,
+     * including an optional nested category reference.
      *
-     * PURPOSE:
-     * This method handles the mapToResponse operation.
-     *
-     * PARAMETERS:
-     * @param product - Product value
-     *
-     * RETURN VALUE:
-     * @return ProductResponse - Result of the operation
-     *
+     * @param product the product entity
+     * @return the populated response DTO
      */
     private ProductResponse mapToResponse(Product product) {
         CategoryResponse categoryRef = null;
@@ -566,6 +379,13 @@ public class ProductServiceImpl implements ProductService {
                 .build();
     }
 
+    /**
+     * Maps a {@link com.sourabh.product_service.entity.Category} entity to
+     * a {@link CategoryResponse} DTO for embedding in product responses.
+     *
+     * @param category the category entity
+     * @return the category response DTO
+     */
     private CategoryResponse mapCategoryToResponse(com.sourabh.product_service.entity.Category category) {
         return CategoryResponse.builder()
                 .uuid(category.getUuid())
@@ -579,6 +399,18 @@ public class ProductServiceImpl implements ProductService {
                 .build();
     }
 
+    /**
+     * Builds a JPA {@link Predicate} for keyword-based filtering.
+     *
+     * <p>If the keyword is blank or null a tautology ({@code conjunction})
+     * is returned. Otherwise a case-insensitive LIKE is applied across
+     * the name, description, and category columns.</p>
+     *
+     * @param cb      the criteria builder
+     * @param root    the product root
+     * @param keyword the search keyword (may be null)
+     * @return the composed predicate
+     */
     private Predicate keywordPredicate(
             CriteriaBuilder cb,
             Root<Product> root,
@@ -597,15 +429,16 @@ public class ProductServiceImpl implements ProductService {
         );
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Validates the product is ACTIVE and has sufficient stock. If stock
+     * reaches zero the status is automatically set to OUT_OF_STOCK.
+     * Evicts the product from the Redis cache.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#productUuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String reduceStock(String productUuid, Integer quantity) {
 
         Product product = productRepository
@@ -634,15 +467,15 @@ public class ProductServiceImpl implements ProductService {
         return "Stock reduced successfully";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Saga compensation method. Restores the given quantity and flips
+     * the product back to ACTIVE if it was previously OUT_OF_STOCK.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#productUuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String restoreStock(String productUuid, Integer quantity) {
 
         Product product = productRepository
@@ -664,15 +497,17 @@ public class ProductServiceImpl implements ProductService {
         return "Stock restored successfully";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Computes a running average:
+     * {@code newAvg = (currentAvg * count + rating) / (count + 1)}.
+     * Evicts the product from the cache so subsequent reads reflect the
+     * updated rating.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "products", key = "#productUuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public void updateRating(String productUuid, Integer rating) {
 
         Product product = productRepository
@@ -696,6 +531,13 @@ public class ProductServiceImpl implements ProductService {
                 productUuid, String.format("%.2f", newAverage), currentCount + 1);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Fetches {@code size + 1} rows to determine whether a next page
+     * exists. The extra row is discarded from the result; its ID becomes
+     * the {@code nextCursor} for the subsequent page.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponse<ProductResponse> listProductsCursor(Long cursor, int size) {

@@ -6,74 +6,31 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-// Spring Configuration - Defines beans and infrastructure setup
+/**
+ * Spring MVC configuration class that registers custom
+ * {@link org.springframework.web.servlet.HandlerInterceptor} instances
+ * with the application's request processing pipeline.
+ *
+ * <p>Currently registers the {@link InternalSecretInterceptor} to protect
+ * all {@code /api/orders/**} endpoints, ensuring only requests carrying a
+ * valid internal secret header are processed.</p>
+ *
+ * @see InternalSecretInterceptor
+ */
 @Configuration
 @RequiredArgsConstructor
-/**
- * SPRING CONFIGURATION - Bean Definitions and App Setup
- * 
- * PURPOSE:
- * Defines Spring beans and application-level configuration.
- * Beans are singleton objects managed by Spring IoC container.
- * 
- * COMMON CONFIGURATION TYPES:
- * 
- * 1. FeignConfig:
- *    - Configures Feign client behavior (timeouts, error decoder)
- *    - Sets up request interceptors for adding headers
- * 
- * 2. KafkaConfig:
- *    - Producer: Serialization, acks, retries
- *    - Consumer: Deserialization, group ID, auto-commit
- * 
- * 3. CacheConfig:
- *    - Redis connection settings
- *    - Cache TTL (time-to-live) for @Cacheable
- * 
- * 4. WebConfig:
- *    - CORS mappings
- *    - Message converters (JSON, XML)
- *    - Interceptors
- * 
- * 5. AsyncConfig:
- *    - Thread pool for @Async methods
- *    - Executor configuration
- * 
- * BEAN LIFECYCLE:
- * @Bean annotations tell Spring to:
- * 1. Create instance of return type
- * 2. Manage as singleton in application context
- * 3. Inject into other classes via @Autowired
- * 
- * EXAMPLE:
- * @Bean
- * public RestTemplate restTemplate() {
- *   return new RestTemplate(); // Spring manages this instance
- * }
- * 
- * Usage in other classes:
- * @Autowired
- * private RestTemplate restTemplate; // Spring injects the bean
- */
 public class WebConfig implements WebMvcConfigurer {
 
+    /** Interceptor that validates the {@code X-Internal-Secret} header on inbound requests. */
     private final InternalSecretInterceptor internalSecretInterceptor;
 
-    @Override
     /**
-     * ADDINTERCEPTORS - Method Documentation
+     * Registers the {@link InternalSecretInterceptor} to intercept all
+     * requests matching the {@code /api/orders/**} URL pattern.
      *
-     * PURPOSE:
-     * This method handles the addInterceptors operation.
-     *
-     * PARAMETERS:
-     * @param registry - InterceptorRegistry value
-     *
-     * ANNOTATIONS USED:
-     * @Autowired - Applied to this method
-     * @Override - Implements interface method
-     *
+     * @param registry the {@link InterceptorRegistry} provided by Spring MVC
      */
+    @Override
     public void addInterceptors(InterceptorRegistry registry) {
 
         registry.addInterceptor(internalSecretInterceptor)

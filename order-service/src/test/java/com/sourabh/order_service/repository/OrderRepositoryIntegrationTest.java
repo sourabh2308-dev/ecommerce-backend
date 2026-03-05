@@ -23,6 +23,19 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Integration tests for {@link OrderRepository} running against a real
+ * PostgreSQL 15 instance managed by Testcontainers.
+ *
+ * <p>Verifies custom query methods including soft-delete filtering,
+ * buyer-scoped lookups, seller-based queries, and pagination behaviour.
+ * {@code @DataJpaTest} restricts the context to JPA components only,
+ * keeping test startup fast.</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
@@ -32,16 +45,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("OrderRepository Integration Tests (Testcontainers)")
 class OrderRepositoryIntegrationTest {
 
+    /** Disposable PostgreSQL container auto-wired into the datasource. */
     @Container
     @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
 
+    /** JPA repository under test. */
     @Autowired
     private OrderRepository orderRepository;
 
+    /** Active order owned by buyer-1 (contains one item from seller-1). */
     private Order order1;
+
+    /** Active order owned by buyer-2 (initially has no items). */
     private Order order2;
 
+    /**
+     * Seeds the database with two active orders and one soft-deleted order
+     * before every test, ensuring a clean and predictable state.
+     */
     @BeforeEach
     void setUp() {
         orderRepository.deleteAll();
@@ -87,6 +109,7 @@ class OrderRepositoryIntegrationTest {
         orderRepository.saveAll(List.of(order1, order2, deletedOrder));
     }
 
+    /** Ensures a non-deleted order is returned when queried by UUID. */
     @Test
     @DisplayName("findByUuidAndIsDeletedFalse: returns non-deleted order")
     void findByUuid_notDeleted_found() {
@@ -95,6 +118,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(result.get().getBuyerUuid()).isEqualTo("buyer-1");
     }
 
+    /** Confirms that a soft-deleted order is excluded from UUID lookups. */
     @Test
     @DisplayName("findByUuidAndIsDeletedFalse: does not return soft-deleted order")
     void findByUuid_deleted_notFound() {
@@ -102,6 +126,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(result).isEmpty();
     }
 
+    /** Verifies the global non-deleted listing excludes soft-deleted rows. */
     @Test
     @DisplayName("findByIsDeletedFalse: returns only non-deleted orders")
     void findByIsDeletedFalse_onlyActive() {
@@ -110,6 +135,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(page.getContent()).noneMatch(Order::getIsDeleted);
     }
 
+    /** Checks buyer-scoped query returns only that buyer’s active orders. */
     @Test
     @DisplayName("findByBuyerUuidAndIsDeletedFalse: returns orders for specific buyer only")
     void findByBuyerUuid_returnsOnlyBuyersOrders() {
@@ -118,6 +144,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(page.getContent().get(0).getUuid()).isEqualTo("order-buyer1-a");
     }
 
+    /** Validates seller-based query returns orders containing the seller’s items. */
     @Test
     @DisplayName("findOrdersBySeller: returns orders containing seller's items")
     void findOrdersBySeller_returnsMatchingOrders() {
@@ -126,6 +153,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(page.getContent().get(0).getUuid()).isEqualTo("order-buyer1-a");
     }
 
+    /** Ensures an unknown seller UUID yields an empty result set. */
     @Test
     @DisplayName("findOrdersBySeller: returns empty for unknown seller")
     void findOrdersBySeller_unknownSeller_empty() {
@@ -133,14 +161,15 @@ class OrderRepositoryIntegrationTest {
         assertThat(page.getTotalElements()).isZero();
     }
 
+    /** Confirms soft-deleted orders of the same buyer are excluded. */
     @Test
     @DisplayName("findByBuyerUuidAndIsDeletedFalse: excludes soft-deleted orders of same buyer")
     void findByBuyerUuid_excludesDeletedOrders() {
         Page<Order> page = orderRepository.findByBuyerUuidAndIsDeletedFalse("buyer-1", PageRequest.of(0, 10));
-        // buyer-1 has order1 (active) and deletedOrder (soft-deleted), should only return 1
         assertThat(page.getTotalElements()).isEqualTo(1);
     }
 
+    /** Tests that pagination metadata (total pages, size) is computed correctly. */
     @Test
     @DisplayName("findByIsDeletedFalse: pagination works correctly")
     void findByIsDeletedFalse_pagination() {
@@ -150,6 +179,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(page1.getSize()).isEqualTo(1);
     }
 
+    /** Validates that UUID matching is exact (partial matches do not return results). */
     @Test
     @DisplayName("findByUuidAndIsDeletedFalse: exact UUID match required")
     void findByUuid_exactMatch() {
@@ -160,6 +190,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(result2).isEmpty();
     }
 
+    /** Verifies seller query behaviour when a seller has items in multiple orders. */
     @Test
     @DisplayName("findOrdersBySeller: seller with multiple orders")
     void findOrdersBySeller_multipleOrdersForSeller() {
@@ -177,6 +208,7 @@ class OrderRepositoryIntegrationTest {
         assertThat(page.getTotalElements()).isGreaterThanOrEqualTo(1);
     }
 
+    /** Ensures order items are persisted and eagerly loaded correctly. */
     @Test
     @DisplayName("order with items persisted correctly")
     void orderWithItems_persistedCorrectly() {

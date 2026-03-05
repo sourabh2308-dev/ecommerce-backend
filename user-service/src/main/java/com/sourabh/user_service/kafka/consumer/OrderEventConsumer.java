@@ -16,22 +16,46 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Consumes order status change events from order-service.
- * Creates in-app notifications and sends email notifications.
+ * Kafka consumer that reacts to order-status-change events published by
+ * the order-service on the {@code order.status.changed} topic.
+ * <p>
+ * For every qualifying event the consumer:
+ * <ol>
+ *   <li>Creates an in-app {@link com.sourabh.user_service.entity.Notification}
+ *       via {@link NotificationService}.</li>
+ *   <li>Sends an HTML email to the buyer via {@link EmailService}.</li>
+ *   <li>On {@code DELIVERED} status, fetches the invoice PDF from order-service
+ *       and emails it as an attachment.</li>
+ * </ol>
+ * </p>
+ *
+ * @see OrderStatusChangedEvent
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class OrderEventConsumer {
 
+    /** Service used to persist in-app notifications. */
     private final NotificationService notificationService;
+
+    /** Service responsible for sending transactional emails. */
     private final EmailService emailService;
+
+    /** Repository for looking up buyer details by UUID. */
     private final UserRepository userRepository;
+
+    /** Feign client to fetch invoice PDFs from order-service. */
     private final com.sourabh.user_service.feign.OrderServiceClient orderServiceClient;
 
+    /** Shared secret used when calling internal order-service endpoints. */
     @Value("${internal.secret}")
     private String internalSecret;
 
+    /**
+     * Static mapping from order-status strings to the corresponding
+     * {@link NotificationType} enum value.
+     */
     private static final Map<String, NotificationType> STATUS_TO_TYPE = Map.of(
             "CONFIRMED", NotificationType.ORDER_CONFIRMED,
             "SHIPPED", NotificationType.ORDER_SHIPPED,
@@ -39,24 +63,31 @@ public class OrderEventConsumer {
             "CANCELLED", NotificationType.ORDER_CANCELLED
     );
 
+    /**
+     * Handles incoming {@link OrderStatusChangedEvent} messages from the
+     * {@code order.status.changed} Kafka topic.
+     * <p>
+     * Determines the appropriate notification type, builds a title and
+     * message, creates an in-app notification, and dispatches an email.
+     * </p>
+     *
+     * @param event the deserialized order-status-change event
+     */
     @KafkaListener(topics = "order.status.changed", groupId = "user-service-group")
     public void handleOrderStatusChanged(OrderStatusChangedEvent event) {
         log.info("Received OrderStatusChangedEvent: orderUuid={}, {} -> {}",
                 event.getOrderUuid(), event.getOldStatus(), event.getNewStatus());
 
         try {
-            // Determine notification type
             NotificationType type = STATUS_TO_TYPE.getOrDefault(
                     event.getNewStatus(), NotificationType.SYSTEM);
 
             String title = buildTitle(event.getNewStatus(), event.getOrderUuid());
             String message = buildMessage(event);
 
-            // Create in-app notification
             notificationService.sendNotification(
                     event.getBuyerUuid(), type, title, message, event.getOrderUuid());
 
-            // Send email
             sendEmailNotification(event, title, message);
 
         } catch (Exception e) {
@@ -65,6 +96,17 @@ public class OrderEventConsumer {
         }
     }
 
+    /**
+     * Sends an HTML email to the buyer for the given order event.
+     * <p>
+     * If the new status is {@code DELIVERED}, a follow-up email with the
+     * invoice PDF attachment is also sent.
+     * </p>
+     *
+     * @param event   the order-status-change event
+     * @param title   the email subject / notification title
+     * @param message the human-readable notification body
+     */
     private void sendEmailNotification(OrderStatusChangedEvent event, String title, String message) {
         Optional<User> userOpt = userRepository.findByUuidAndIsDeletedFalse(event.getBuyerUuid());
         if (userOpt.isEmpty()) {
@@ -98,7 +140,6 @@ public class OrderEventConsumer {
             emailService.sendHtmlEmail(user.getEmail(), title, htmlBody);
             log.info("Order status email sent to {}", user.getEmail());
 
-            // when delivered, automatically send the invoice attachment
             if ("DELIVERED".equals(event.getNewStatus())) {
                 try {
                     byte[] pdf = orderServiceClient.getInvoice(event.getOrderUuid(), internalSecret);
@@ -114,6 +155,13 @@ public class OrderEventConsumer {
         }
     }
 
+    /**
+     * Builds a user-facing notification title based on the new order status.
+     *
+     * @param newStatus the new order status string
+     * @param orderUuid the order's public UUID
+     * @return a formatted title string
+     */
     private String buildTitle(String newStatus, String orderUuid) {
         return switch (newStatus) {
             case "CONFIRMED" -> "Order Confirmed - " + orderUuid;
@@ -125,6 +173,12 @@ public class OrderEventConsumer {
         };
     }
 
+    /**
+     * Builds a descriptive notification message based on the event's new status.
+     *
+     * @param event the order-status-change event
+     * @return a human-readable message body
+     */
     private String buildMessage(OrderStatusChangedEvent event) {
         return switch (event.getNewStatus()) {
             case "CONFIRMED" -> "Your order has been confirmed and is being prepared.";

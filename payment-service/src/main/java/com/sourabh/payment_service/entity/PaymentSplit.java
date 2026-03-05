@@ -6,8 +6,27 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 /**
- * Tracks the revenue split for each seller within a payment.
- * For each OrderItem from a seller, one PaymentSplit record is created.
+ * JPA entity tracking the revenue split for a single order line item within a
+ * {@link Payment}.
+ *
+ * <p>For every {@code OrderItemEvent} consumed from Kafka, one
+ * {@code PaymentSplit} row is created.  The split captures the gross item
+ * amount and how it is divided among:
+ * <ul>
+ *   <li>Platform commission ({@link #platformFee})</li>
+ *   <li>Delivery charge ({@link #deliveryFee})</li>
+ *   <li>Net seller payout ({@link #sellerPayout})</li>
+ * </ul>
+ *
+ * <p><b>Calculation:</b>
+ * <pre>
+ *   platformFee  = itemAmount * (platformFeePercent / 100)
+ *   deliveryFee  = deliveryFeePerItem * quantity
+ *   sellerPayout = itemAmount - platformFee - deliveryFee   (floor 0)
+ * </pre>
+ *
+ * @see Payment
+ * @see PaymentSplitStatus
  */
 @Entity
 @Table(name = "payment_split")
@@ -18,131 +37,52 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class PaymentSplit {
 
+    /** Auto-generated primary key. */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
-    /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
-     */
-
-
+    /** UUID of the parent {@link Payment} this split belongs to. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String paymentUuid;
 
+    /** UUID of the order that triggered this split. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String orderUuid;
 
+    /** UUID of the seller receiving the payout. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String sellerUuid;
 
+    /** UUID of the product in this line item. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String productUuid;
 
-    /** Gross amount for this line item (price * quantity) */
+    /** Gross amount for this line item (price x quantity). */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private Double itemAmount;
 
-    /** Platform commission percentage (e.g. 10.0 for 10%) */
+    /** Platform commission percentage applied (e.g. 10.0 for 10 %). */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private Double platformFeePercent;
 
-    /** Platform commission amount */
+    /** Absolute platform commission amount. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private Double platformFee;
 
-    /** Delivery fee charged */
+    /** Delivery fee charged for this line item. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private Double deliveryFee;
 
-    /** Net amount payable to seller = itemAmount - platformFee - deliveryFee */
+    /** Net amount payable to the seller: {@code itemAmount - platformFee - deliveryFee}. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private Double sellerPayout;
 
+    /** Current settlement status of this split. */
     @Enumerated(EnumType.STRING)
-    // @Enumerated applied to field below
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private PaymentSplitStatus status;
 
+    /** Timestamp when this split record was created. */
     private LocalDateTime createdAt;
 }

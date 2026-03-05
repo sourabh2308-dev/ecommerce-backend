@@ -12,123 +12,66 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Centralised exception handler for the order-service that intercepts
+ * exceptions thrown by any {@code @RestController} and converts them into
+ * a uniform {@link ErrorResponse} JSON structure.
+ *
+ * <p>Each {@link ExceptionHandler} method maps a specific exception type
+ * to the appropriate HTTP status code, ensuring that stack traces are never
+ * leaked to API consumers and that error responses remain consistent.</p>
+ *
+ * @see ErrorResponse
+ */
 @Slf4j
 @RestControllerAdvice
-/**
- * GLOBAL EXCEPTION HANDLER - Centralized Error Response Generator
- * 
- * PURPOSE:
- * Intercepts all exceptions thrown in the application and converts them
- * to standardized JSON error responses. Prevents stack traces from leaking
- * to clients and ensures consistent error format across all endpoints.
- * 
- * ARCHITECTURE:
- * @RestControllerAdvice: Spring AOP that intercepts controller exceptions
- * @ExceptionHandler: Maps specific exception types to handler methods
- * 
- * ERROR RESPONSE FORMAT:
- * {
- *   "timestamp": "2026-02-25T10:30:00",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- * 
- * EXCEPTION MAPPING:
- * - Custom exceptions (NotFoundException, etc.) → Specific HTTP codes
- * - MethodArgumentNotValidException → 400 with validation details
- * - Generic Exception → 500 INTERNAL SERVER ERROR
- * 
- * LOGGING:
- * All exceptions logged at ERROR level for debugging and monitoring.
- * Stack traces captured for server-side analysis.
- */
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(OrderNotFoundException.class)
     /**
-     * HANDLENOTFOUND - Method Documentation
+     * Handles {@link OrderNotFoundException} and returns a {@code 404 Not Found}
+     * response with error code {@code ORDER_NOT_FOUND}.
      *
-     * PURPOSE:
-     * This method handles the handleNotFound operation.
-     *
-     * PARAMETERS:
-     * @param ex - OrderNotFoundException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown exception
+     * @return a {@link ResponseEntity} containing the error details
      */
+    @ExceptionHandler(OrderNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(OrderNotFoundException ex) {
         return buildError("ORDER_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(OrderAccessException.class)
     /**
-     * HANDLEACCESS - Method Documentation
+     * Handles {@link OrderAccessException} and returns a {@code 403 Forbidden}
+     * response with error code {@code ORDER_ACCESS_DENIED}.
      *
-     * PURPOSE:
-     * This method handles the handleAccess operation.
-     *
-     * PARAMETERS:
-     * @param ex - OrderAccessException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown exception
+     * @return a {@link ResponseEntity} containing the error details
      */
+    @ExceptionHandler(OrderAccessException.class)
     public ResponseEntity<ErrorResponse> handleAccess(OrderAccessException ex) {
         return buildError("ORDER_ACCESS_DENIED", ex.getMessage(), HttpStatus.FORBIDDEN);
     }
 
-    @ExceptionHandler(OrderStateException.class)
     /**
-     * HANDLESTATE - Method Documentation
+     * Handles {@link OrderStateException} and returns a {@code 400 Bad Request}
+     * response with error code {@code ORDER_INVALID_STATE}.
      *
-     * PURPOSE:
-     * This method handles the handleState operation.
-     *
-     * PARAMETERS:
-     * @param ex - OrderStateException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown exception
+     * @return a {@link ResponseEntity} containing the error details
      */
+    @ExceptionHandler(OrderStateException.class)
     public ResponseEntity<ErrorResponse> handleState(OrderStateException ex) {
         return buildError("ORDER_INVALID_STATE", ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * HANDLEVALIDATION - Method Documentation
+     * Handles bean-validation failures triggered by {@code @Valid} and
+     * returns a {@code 400 Bad Request} response containing the list of
+     * per-field validation error messages.
      *
-     * PURPOSE:
-     * This method handles the handleValidation operation.
-     *
-     * PARAMETERS:
-     * @param ex - MethodArgumentNotValidException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the validation exception containing binding result errors
+     * @return a {@link ResponseEntity} with detailed field-level error messages
      */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<String> errors = ex.getBindingResult()
                 .getAllErrors()
@@ -146,45 +89,28 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(Exception.class)
     /**
-     * HANDLEGENERAL - Method Documentation
+     * Catch-all handler for any unhandled exception. Logs the full stack trace
+     * for server-side diagnostics and returns a generic {@code 500 Internal
+     * Server Error} response.
      *
-     * PURPOSE:
-     * This method handles the handleGeneral operation.
-     *
-     * PARAMETERS:
-     * @param ex - Exception value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the unhandled exception
+     * @return a {@link ResponseEntity} with a generic error message
      */
+    @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneral(Exception ex) {
         log.error("Unhandled exception", ex);
         return buildError("INTERNAL_SERVER_ERROR", "Something went wrong", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     /**
-     * BUILDERROR - Method Documentation
+     * Helper method that constructs a standardised {@link ErrorResponse}
+     * wrapped in a {@link ResponseEntity} with the given HTTP status.
      *
-     * PURPOSE:
-     * This method handles the buildError operation.
-     *
-     * PARAMETERS:
-     * @param code - String value
-     * @param message - String value
-     * @param status - HttpStatus value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param code    application-specific error code
+     * @param message human-readable error description
+     * @param status  the HTTP status to return
+     * @return a {@link ResponseEntity} containing the built {@link ErrorResponse}
      */
     private ResponseEntity<ErrorResponse> buildError(String code, String message, HttpStatus status) {
         return new ResponseEntity<>(

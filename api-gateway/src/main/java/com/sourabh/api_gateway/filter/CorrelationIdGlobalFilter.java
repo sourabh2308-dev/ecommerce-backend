@@ -13,26 +13,54 @@ import reactor.core.publisher.Mono;
 import java.util.UUID;
 
 /**
- * API Gateway correlation-ID filter.
+ * Global gateway filter that ensures every request carries a unique correlation
+ * identifier for end-to-end distributed tracing.
  *
- * <p>For each incoming request:
+ * <h3>Behaviour</h3>
  * <ol>
- *   <li>Reads or generates a {@code X-Correlation-Id} header.
- *   <li>Forwards the header to downstream services so they can correlate logs.
- *   <li>Echoes the value back in the response header.
+ *   <li>Reads the incoming {@code X-Correlation-Id} header. If the header is
+ *       absent or blank, a new UUID is generated.</li>
+ *   <li>Forwards the correlation ID to the downstream service by mutating the
+ *       outgoing request headers.</li>
+ *   <li>Echoes the same value back to the caller in the response headers so
+ *       clients can correlate their request with server-side logs.</li>
+ *   <li>Stores the ID in the Reactor {@link reactor.util.context.Context} so
+ *       reactive operators further down the chain can access it.</li>
  * </ol>
  *
- * <p>Downstream services (servlet-based) use {@code CorrelationIdFilter} to
- * pick up this header and put it in their MDC.
+ * <h3>Filter Ordering</h3>
+ * <p>Runs at {@link Ordered#HIGHEST_PRECEDENCE} so the correlation ID is
+ * available to every subsequent filter (including rate limiting, security,
+ * and routing).</p>
+ *
+ * <p>Downstream servlet-based services pick up this header via their own
+ * {@code CorrelationIdFilter} and place it into the SLF4J MDC for structured
+ * logging.</p>
+ *
+ * @see RateLimitGlobalFilter
  */
 @Component
 @Slf4j
-// HTTP Filter - Intercepts requests for cross-cutting concerns
 public class CorrelationIdGlobalFilter implements GlobalFilter, Ordered {
 
+    /** HTTP header name used to carry the correlation identifier. */
     public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+
+    /** Key used when storing the correlation ID in the SLF4J MDC or Reactor Context. */
     public static final String MDC_KEY = "correlationId";
 
+    /**
+     * Intercepts each exchange to ensure a correlation ID is present.
+     *
+     * <p>If the incoming request already contains a valid
+     * {@code X-Correlation-Id} header the value is reused; otherwise a fresh
+     * UUID v4 is generated. The ID is then propagated to both the downstream
+     * request and the client response.</p>
+     *
+     * @param exchange the current server exchange
+     * @param chain    provides a way to delegate to the next filter
+     * @return {@link Mono} that completes when the downstream chain finishes
+     */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
 
@@ -45,7 +73,6 @@ public class CorrelationIdGlobalFilter implements GlobalFilter, Ordered {
 
         final String finalCorrelationId = correlationId;
 
-        // Forward the header to downstream services
         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                 .header(CORRELATION_ID_HEADER, finalCorrelationId)
                 .build();
@@ -54,16 +81,22 @@ public class CorrelationIdGlobalFilter implements GlobalFilter, Ordered {
                 .request(mutatedRequest)
                 .build();
 
-        // Echo back in the response
         mutatedExchange.getResponse().getHeaders().add(CORRELATION_ID_HEADER, finalCorrelationId);
 
         return chain.filter(mutatedExchange)
                 .contextWrite(ctx -> ctx.put(MDC_KEY, finalCorrelationId));
     }
 
+    /**
+     * Returns the filter's execution order.
+     *
+     * <p>{@link Ordered#HIGHEST_PRECEDENCE} guarantees this filter runs before
+     * all other global filters, including {@link RateLimitGlobalFilter}.</p>
+     *
+     * @return the highest-precedence order value
+     */
     @Override
     public int getOrder() {
-        // Run before the rate limit filter
         return Ordered.HIGHEST_PRECEDENCE;
     }
 }

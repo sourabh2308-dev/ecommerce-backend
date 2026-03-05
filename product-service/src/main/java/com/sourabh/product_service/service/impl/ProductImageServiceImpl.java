@@ -14,13 +14,34 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Implementation of {@link ProductImageService} for managing product images.
+ *
+ * <p>Images are stored as URL references with a display order and optional
+ * alt text. Only the product's owning seller may add or remove images.
+ * When no explicit display order is provided, new images are appended
+ * after the last existing image.</p>
+ *
+ * @see ProductImageService
+ * @see ProductImageRepository
+ */
 @Service
 @RequiredArgsConstructor
 public class ProductImageServiceImpl implements ProductImageService {
 
+    /** Repository for product entity lookups. */
     private final ProductRepository productRepository;
+
+    /** Repository for product-image persistence. */
     private final ProductImageRepository imageRepository;
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>If no display order is specified in the request, the image is
+     * assigned an order equal to the current image count (i.e. appended
+     * at the end).</p>
+     */
     @Override
     @Transactional
     public ImageResponse addImage(String productUuid, String sellerUuid, ImageRequest request) {
@@ -40,6 +61,7 @@ public class ProductImageServiceImpl implements ProductImageService {
         return mapToResponse(imageRepository.save(image));
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public List<ImageResponse> getImages(String productUuid) {
@@ -49,6 +71,7 @@ public class ProductImageServiceImpl implements ProductImageService {
                 .stream().map(this::mapToResponse).toList();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public String deleteImage(String productUuid, String sellerUuid, Long imageId) {
@@ -57,6 +80,15 @@ public class ProductImageServiceImpl implements ProductImageService {
         return "Image deleted";
     }
 
+    /**
+     * Retrieves a product and verifies seller ownership.
+     *
+     * @param productUuid the UUID of the product
+     * @param sellerUuid  the UUID of the expected owner
+     * @return the validated {@link Product}
+     * @throws ProductNotFoundException if the product does not exist
+     * @throws RuntimeException         if the seller is not the owner
+     */
     private Product getOwnedProduct(String productUuid, String sellerUuid) {
         Product product = productRepository.findByUuidAndIsDeletedFalse(productUuid)
                 .orElseThrow(() -> new ProductNotFoundException("Product not found"));
@@ -66,6 +98,12 @@ public class ProductImageServiceImpl implements ProductImageService {
         return product;
     }
 
+    /**
+     * Maps a {@link ProductImage} entity to an {@link ImageResponse} DTO.
+     *
+     * @param img the image entity
+     * @return the response DTO
+     */
     private ImageResponse mapToResponse(ProductImage img) {
         return ImageResponse.builder()
                 .id(img.getId())

@@ -6,49 +6,47 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
+/**
+ * Declarative Feign client for synchronous HTTP communication with the
+ * <strong>order-service</strong>.
+ *
+ * <p>At runtime Spring Cloud OpenFeign generates an implementation of this
+ * interface that translates method invocations into HTTP requests. The base
+ * URL is resolved from the {@code service.order.url} property (typically
+ * {@code http://order-service:8080}).
+ *
+ * <h3>Circuit Breaker</h3>
+ * Resilience4j wraps every call with a circuit breaker
+ * ({@code resilience4j.circuitbreaker.instances.order-service}). When the
+ * breaker is open the {@link OrderServiceClientFallback} is invoked instead,
+ * which throws a {@link com.sourabh.review_service.exception.ReviewException}
+ * informing the caller that order verification is temporarily unavailable.
+ *
+ * <h3>Internal Authentication</h3>
+ * The {@link com.sourabh.review_service.config.FeignConfig} request
+ * interceptor automatically attaches the {@code X-Internal-Secret} header
+ * to every outgoing request.
+ *
+ * @see OrderServiceClientFallback
+ * @see com.sourabh.review_service.config.FeignConfig
+ */
 @FeignClient(
         name = "order-service",
         url = "${service.order.url}",
         fallback = OrderServiceClientFallback.class
 )
-/**
- * FEIGN CLIENT - Declarative REST Client for Inter-Service Communication
- * 
- * PURPOSE:
- * Enables synchronous HTTP calls to other microservices in a declarative way.
- * Feign generates implementation at runtime from this interface definition.
- * 
- * HOW IT WORKS:
- * 1. @FeignClient registers this interface with Spring Cloud
- * 2. Service discovery (Eureka) resolves service name to actual host:port
- * 3. Load balancer (Ribbon) selects instance if multiple replicas exist
- * 4. Circuit breaker (Resilience4j) wraps calls for fault tolerance
- * 5. Method invocation triggers HTTP request with specified path/method
- * 
- * ANNOTATIONS:
- * @FeignClient(name = "service-name")
- *   - name: Matches spring.application.name of target service
- *   - Enables service discovery via Eureka
- * 
- * @GetMapping/@PostMapping/@PutMapping/@DeleteMapping
- *   - Maps to HTTP methods
- *   - Path combines with @FeignClient base path
- * 
- * @PathVariable/@RequestParam/@RequestBody
- *   - Maps method parameters to HTTP request parts
- * 
- * ERROR HANDLING:
- * Throws FeignException on HTTP errors (4xx, 5xx)
- * Caller must handle exceptions and implement compensation logic
- * 
- * EXAMPLE FLOW:
- * OrderService → ProductServiceClient.reduceStock()
- *   → HTTP POST product-service/api/product/internal/{uuid}/reduce-stock
- *   → Product stock updated in product_db
- *   → Response or FeignException returned
- */
 public interface OrderServiceClient {
 
+    /**
+     * Retrieves an order by its UUID from the order-service.
+     *
+     * <p>Used during review creation to verify that the buyer owns the
+     * order, the order has been delivered, and the order contains the
+     * product being reviewed.
+     *
+     * @param uuid the unique identifier of the order to fetch
+     * @return the {@link OrderDto} representing the order
+     */
     @GetMapping("/api/order/{uuid}")
     OrderDto getOrder(@PathVariable("uuid") String uuid);
 }

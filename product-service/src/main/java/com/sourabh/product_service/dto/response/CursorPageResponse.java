@@ -7,15 +7,30 @@ import java.util.List;
 
 /**
  * Cursor-based pagination response.
- * Uses the last item's ID as cursor for the next page, avoiding offset-based pagination issues.
+ *
+ * <p>Unlike offset-based pagination ({@link com.sourabh.product_service.common.PageResponse}),
+ * cursor pagination uses the last returned item's identifier as a bookmark for
+ * the next page.  This avoids duplicated or skipped rows when the underlying
+ * data changes between page requests.
+ *
+ * @param <T> the element type contained in {@link #content}
  */
 @Getter
 @Builder
 public class CursorPageResponse<T> {
+
+    /** Items on the current page. */
     private List<T> content;
+
+    /** Maximum number of items per page. */
     private int size;
+
+    /** Total number of matching items across all pages. */
     private long totalElements;
+
+    /** {@code true} if more pages are available after this one. */
     private boolean hasNext;
-    /** Cursor to pass for the next page (last item's ID). Null if no more pages. */
+
+    /** Opaque cursor to pass when requesting the next page; {@code null} when there are no more pages. */
     private String nextCursor;
 }

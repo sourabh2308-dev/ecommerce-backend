@@ -1,40 +1,52 @@
 package com.sourabh.payment_service.gateway;
 
-import com.sourabh.payment_service.entity.PaymentStatus;
-
 /**
- * Abstraction over an external payment provider.  The real system can switch
- * between a mock implementation (used for local development & tests) and a
- * concrete gateway such as Razorpay without changing the service logic.
+ * Strategy interface abstracting the external payment provider.
  *
- * Implementations should be lightweight and stateless; any network clients
- * may be created in constructors.  The interface is intentionally simple –
- * real-world gateways typically require additional steps (webhooks, tokens)
- * which are handled by the service layer.
+ * <p>The application can switch between implementations without changing
+ * service-layer logic:
+ * <ul>
+ *   <li>{@link MockPaymentGateway} — returns randomised success/failure
+ *       strings; used for local development and automated tests.</li>
+ *   <li>{@link RazorpayGateway} — calls the Razorpay Orders API over
+ *       HTTPS and returns the gateway order ID; supports HMAC-SHA256
+ *       webhook signature verification.</li>
+ * </ul>
+ *
+ * <p>The active implementation is selected at startup by
+ * {@link com.sourabh.payment_service.config.PaymentGatewayConfig}.
+ *
+ * @see com.sourabh.payment_service.config.PaymentGatewayConfig
  */
 public interface PaymentGateway {
 
     /**
-     * Initiate a payment of the specified amount, returning a provider-specific
-     * response string.  The caller is responsible for interpreting the string
-     * (e.g. order id, "SUCCESS"/"FAILED" message).
+     * Initiates a payment of the specified amount with the external provider.
      *
-     * @param amount   monetary value in the gateway's expected currency units
-     * @param currency ISO currency code such as "INR" (always INR for now)
-     * @param receipt  unique identifier provided by the caller (usually the
-     *                 internal payment UUID)
-     * @return provider result string
+     * <p>The return value is provider-specific.  The service layer interprets
+     * strings starting with {@code "Payment SUCCESS"} or
+     * {@code "Payment FAILED"} as terminal outcomes; any other value is
+     * treated as an external order ID and the payment remains in
+     * {@code PENDING} status until a webhook callback arrives.
+     *
+     * @param amount   monetary value in the smallest unit expected by the
+     *                 gateway (INR for this platform)
+     * @param currency ISO 4217 currency code (always {@code "INR"} for now)
+     * @param receipt  unique receipt identifier (the internal payment UUID)
+     * @return provider-specific result string
      */
     String initiate(double amount, String currency, String receipt);
 
     /**
-     * Perform signature verification for asynchronous callbacks/webhooks.
-     * Gateways that do not support callbacks may simply return {@code true}.
+     * Verifies the signature accompanying an asynchronous gateway callback.
      *
-     * @param orderId    provider order identifier
-     * @param paymentId  provider payment identifier
-     * @param signature  signature header from the webhook request
-     * @return {@code true} when the signature is valid
+     * <p>The default implementation returns {@code true}, which is appropriate
+     * for gateways that do not support webhook signatures (e.g. mock).
+     *
+     * @param orderId   gateway order identifier
+     * @param paymentId gateway payment identifier
+     * @param signature signature value from the webhook header or body
+     * @return {@code true} if the signature is valid
      */
     default boolean verify(String orderId, String paymentId, String signature) {
         return true;

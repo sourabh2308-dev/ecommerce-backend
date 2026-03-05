@@ -1,29 +1,22 @@
 package com.sourabh.auth_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Thrown when a user referenced during an authentication operation cannot
+ * be found in {@code user-service} &ndash; typically during token refresh
+ * when the user may have been deleted after the original login.
+ *
+ * <p>Handled by
+ * {@link GlobalExceptionHandler#handleUserNotFoundException(UserNotFoundException)},
+ * which returns HTTP 404 Not Found with a {@code USER_NOT_FOUND} code.</p>
  */
 public class UserNotFoundException extends RuntimeException {
+
+    /**
+     * Constructs a {@code UserNotFoundException} with the given detail
+     * message.
+     *
+     * @param message description indicating which user was not found
+     */
     public UserNotFoundException(String message) {
         super(message);
     }

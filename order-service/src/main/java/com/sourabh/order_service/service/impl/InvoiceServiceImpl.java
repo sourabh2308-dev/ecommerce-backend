@@ -18,61 +18,23 @@ import java.awt.*;
 import java.io.ByteArrayOutputStream;
 
 /**
- * ══════════════════════════════════════════════════════════════════════════════
- * INVOICE SERVICE IMPLEMENTATION
- * ══════════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Generates professional PDF invoices for orders in the e-commerce system.
- * This service handles:
- *   1. Retrieval of order details from database
- *   2. PDF document creation using iText library (Apache 2.0 licensed)
- *   3. Professional formatting with branding colors and layout
- *   4. Item-level line details with quantities and pricing
- *   5. Tax and discount calculations on invoice
- *   6. Shipping address and order metadata display
- *   7. Currency formatting for international support
- * 
- * KEY RESPONSIBILITIES:
- * ---------------------
- * - Fetch order data by UUID and validate existence
- * - Create structured PDF document with A4 page size
- * - Format header section with invoice number and metadata
- * - Generate itemized table with product details and amounts
- * - Calculate and display totals (subtotal, tax, discount, final)
- * - Apply professional styling and branding (colors, fonts, spacing)
- * - Handle edge cases (missing fields, null values, currency formatting)
- * 
- * PDF STRUCTURE (Invoice Layout):
- * ──────────────────
- * 1. Title: "INVOICE" (centered, bold, branded color)
- * 2. Order Info: Order UUID, creation date, status, currency
- * 3. Shipping Address: Name, full address, postal code, phone
- * 4. Items Table: Product | Qty | Unit Price | Line Total
- * 5. Totals Section: Discount amount, tax, final total
- * 6. Footer: "Thank you for your purchase!" (centered)
- * 
- * STYLING:
- * ────────
- * - Title Font: Helvetica 18pt, Bold, Color(79, 70, 229) - Brand indigo
- * - Header Font: Helvetica 11pt, Bold, White on indigo background
- * - Body Font: Helvetica 10pt, Normal, Dark gray text
- * - Table borders: Light gray (200,200,200) for subtle grid
- * - Page margins: 40px all sides (professional spacing)
- * 
- * DEPENDENCIES:
- * ──────────────
- * - OrderRepository: Fetches order from database by UUID
- * - iText (com.lowagie.text): Open source PDF generation library
- * 
- * ANNOTATIONS:
- * ─────────────
- * @Service: Marks class as Spring service layer component (business logic)
- * @RequiredArgsConstructor: Lombok generates constructor for final fields
- * 
- * ══════════════════════════════════════════════════════════════════════════════
- * 
+ * Implementation of {@link InvoiceService} that generates branded PDF invoices
+ * using the OpenPDF (iText) library and optionally emails them to buyers.
+ *
+ * <h3>PDF Layout</h3>
+ * <ol>
+ *   <li>Centred "INVOICE" title in brand indigo (79, 70, 229)</li>
+ *   <li>Order metadata: UUID, date, status, currency</li>
+ *   <li>Shipping address block (when available)</li>
+ *   <li>Itemised table: Product | Qty | Unit Price | Subtotal</li>
+ *   <li>Totals section: discount, tax, grand total</li>
+ *   <li>Footer: "Thank you for your purchase!"</li>
+ * </ol>
+ *
+ * <p>Email dispatch resolves the buyer’s address via the user-service Feign
+ * client and sends the Base64-encoded PDF through
+ * {@code UserServiceClient#sendInvoice}.</p>
+ *
  * @author Sourabh
  * @version 1.0
  * @since 2026-02-26
@@ -81,71 +43,38 @@ import java.io.ByteArrayOutputStream;
 @RequiredArgsConstructor
 public class InvoiceServiceImpl implements InvoiceService {
 
+    /** Repository for fetching order data by UUID. */
     private final OrderRepository orderRepository;
+
+    /** Feign client for user-service (email lookup and invoice dispatch). */
     private final com.sourabh.order_service.feign.UserServiceClient userServiceClient;
 
+    /** Title font: Helvetica 18 pt, bold, brand indigo. */
     private static final Font TITLE_FONT = new Font(Font.HELVETICA, 18, Font.BOLD, new Color(79, 70, 229));
+
+    /** Table header font: Helvetica 11 pt, bold, white (for contrast on indigo background). */
     private static final Font HEADER_FONT = new Font(Font.HELVETICA, 11, Font.BOLD, Color.WHITE);
+
+    /** Body text font: Helvetica 10 pt, normal weight, dark grey. */
     private static final Font BODY_FONT = new Font(Font.HELVETICA, 10, Font.NORMAL, Color.DARK_GRAY);
+
+    /** Bold body font used for labels and totals. */
     private static final Font BOLD_FONT = new Font(Font.HELVETICA, 10, Font.BOLD, Color.DARK_GRAY);
+
+    /** Background colour for table header cells (brand indigo). */
     private static final Color HEADER_BG = new Color(79, 70, 229);
 
     /**
-     * Generate a professional PDF invoice for an order.
-     * 
-     * PURPOSE:
-     * Creates a fully formatted PDF invoice document that can be:
-     * - Downloaded by customers from order confirmation page
-     * - Emailed to customer after order completion
-     * - Printed or saved for record-keeping
-     * - Used for accounting and tax documentation
-     * 
-     * PROCESS FLOW:
-     * 1. Fetch order from database by UUID (validate existence)
-     * 2. Create PDF document with A4 page size (210x297mm)
-     * 3. Add title section with centered "INVOICE" heading
-     * 4. Add order metadata (order#, date, status, currency)
-     * 5. Add shipping address section if address data exists
-     * 6. Create itemized table with product details:
-     *    - Column 1: Product name (or UUID if name missing)
-     *    - Column 2: Quantity
-     *    - Column 3: Unit price (formatted with currency symbol)
-     *    - Column 4: Line total (quantity * price)
-     * 7. Add totals section:
-     *    - If discount applied: Show coupon code and discount amount
-     *    - If tax applicable: Show tax percentage and amount
-     *    - Final total amount
-     * 8. Add footer with thank you message
-     * 9. Serialize document to byte array and close
-     * 
-     * PDF STYLING DETAILS:
-     * - Page size: A4 (210x297mm)
-     * - Margins: 40px on all sides (professional spacing)
-     * - Title: Indigo color (79,70,229) matches brand, centered
-     * - Table header: Bold white text on indigo background with padding
-     * - Table cells: Alternating careful spacing, subtle gray borders
-     * - Currency: Indian Rupee symbol ₹ with 2 decimal places
-     * 
-     * EDGE CASES HANDLED:
-     * - Missing product name: Falls back to product UUID
-     * - Missing shipping address: Skips address section
-     * - Null discount/tax amounts: Skips those rows in totals
-     * - Null currency: Defaults to "INR"
-     * 
-     * ERROR HANDLING:
-     * - RuntimeException raised if order not found or deleted
-     * - Catch block converts iText exceptions to RuntimeException
-     * - Error message indicates PDF generation failure
-     * 
-     * @param orderUuid UUID of the order to generate invoice for
-     * 
-     * @return byte[] containing complete PDF binary data that can be:
-     *         - Returned as HTTP response (application/pdf content type)
-     *         - Stored in file system
-     *         - Emailed as attachment
-     *         - Displayed in browser with embedded viewer
-     * 
-     * @throws RuntimeException if order not found, deleted, or PDF generation fails
+     * {@inheritDoc}
+     *
+     * <p>Constructs an A4 PDF document (40 px margins) containing order metadata,
+     * an optional shipping-address block, an itemised product table, discount/tax
+     * totals, and a footer. Falls back to the product UUID when a product name is
+     * unavailable, and defaults the currency to {@code INR}.</p>
+     *
+     * @param orderUuid UUID of the order to invoice
+     * @return byte array containing the complete PDF binary
+     * @throws RuntimeException if the order is not found or PDF generation fails
      */
     @Override
     public byte[] generateInvoice(String orderUuid) {
@@ -157,20 +86,17 @@ public class InvoiceServiceImpl implements InvoiceService {
             PdfWriter.getInstance(doc, out);
             doc.open();
 
-            // Title
             Paragraph title = new Paragraph("INVOICE", TITLE_FONT);
             title.setAlignment(Element.ALIGN_CENTER);
             title.setSpacingAfter(20);
             doc.add(title);
 
-            // Order Info
             doc.add(new Paragraph("Order #: " + order.getUuid(), BOLD_FONT));
             doc.add(new Paragraph("Date: " + order.getCreatedAt(), BODY_FONT));
             doc.add(new Paragraph("Status: " + order.getStatus(), BODY_FONT));
             doc.add(new Paragraph("Currency: " + (order.getCurrency() != null ? order.getCurrency() : "INR"), BODY_FONT));
             doc.add(new Paragraph(" "));
 
-            // Shipping Address
             if (order.getShippingName() != null) {
                 doc.add(new Paragraph("Ship To:", BOLD_FONT));
                 doc.add(new Paragraph(order.getShippingName(), BODY_FONT));
@@ -180,7 +106,6 @@ public class InvoiceServiceImpl implements InvoiceService {
                 doc.add(new Paragraph(" "));
             }
 
-            // Items Table
             PdfPTable table = new PdfPTable(new float[]{4f, 1f, 2f, 2f});
             table.setWidthPercentage(100);
             table.setSpacingBefore(10);
@@ -199,7 +124,6 @@ public class InvoiceServiceImpl implements InvoiceService {
             }
             doc.add(table);
 
-            // Totals
             doc.add(new Paragraph(" "));
             PdfPTable totals = new PdfPTable(new float[]{6f, 2f});
             totals.setWidthPercentage(100);
@@ -213,7 +137,6 @@ public class InvoiceServiceImpl implements InvoiceService {
             addTotalRow(totals, "Total", formatCurrency(order.getTotalAmount()));
             doc.add(totals);
 
-            // Footer
             doc.add(new Paragraph(" "));
             Paragraph footer = new Paragraph("Thank you for your purchase!", BODY_FONT);
             footer.setAlignment(Element.ALIGN_CENTER);
@@ -227,15 +150,24 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Fetches the order, generates a PDF via {@link #generateInvoice},
+     * resolves the buyer’s email from user-service, Base64-encodes the PDF,
+     * and dispatches it through the Feign client.</p>
+     *
+     * @param orderUuid UUID of the order whose invoice should be emailed
+     * @throws RuntimeException if the order or buyer email is unavailable,
+     *                          or the email dispatch fails
+     */
     @Override
     public void emailInvoice(String orderUuid) {
         Order order = orderRepository.findByUuidAndIsDeletedFalse(orderUuid)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
-        // generate bytes (reuse existing logic)
         byte[] pdf = generateInvoice(orderUuid);
 
-        // fetch buyer email from user-service
         InternalUserDto user = userServiceClient.getUserByUuid(order.getBuyerUuid());
         if (user == null || user.getEmail() == null) {
             throw new RuntimeException("Buyer email not available");
@@ -254,6 +186,15 @@ public class InvoiceServiceImpl implements InvoiceService {
         }
     }
 
+    /**
+     * Creates a styled table cell and appends it to the given table.
+     *
+     * @param table   target PDF table
+     * @param text    cell text content
+     * @param font    font to apply
+     * @param bgColor background colour
+     * @param align   horizontal alignment constant from {@link Element}
+     */
     private void addCell(PdfPTable table, String text, Font font, Color bgColor, int align) {
         PdfPCell cell = new PdfPCell(new Phrase(text, font));
         cell.setBackgroundColor(bgColor);
@@ -264,6 +205,13 @@ public class InvoiceServiceImpl implements InvoiceService {
         table.addCell(cell);
     }
 
+    /**
+     * Appends a two-column summary row (label + value) to the totals table.
+     *
+     * @param table target PDF table (2-column layout)
+     * @param label left-aligned label text (e.g. "Discount", "Tax", "Total")
+     * @param value right-aligned formatted currency value
+     */
     private void addTotalRow(PdfPTable table, String label, String value) {
         PdfPCell labelCell = new PdfPCell(new Phrase(label, BOLD_FONT));
         labelCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
@@ -278,6 +226,12 @@ public class InvoiceServiceImpl implements InvoiceService {
         table.addCell(valueCell);
     }
 
+    /**
+     * Formats a monetary amount with the Indian Rupee symbol and two decimal places.
+     *
+     * @param amount numeric amount to format
+     * @return formatted string, e.g. "₹123.45"
+     */
     private String formatCurrency(double amount) {
         return String.format("₹%.2f", amount);
     }

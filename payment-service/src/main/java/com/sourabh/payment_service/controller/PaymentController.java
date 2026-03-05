@@ -12,31 +12,42 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
+/**
+ * REST controller exposing payment endpoints under {@code /api/payment}.
+ *
+ * <p>Responsibilities include payment initiation (buyer), payment retrieval
+ * (buyer / admin), seller earnings views, an unauthenticated webhook for
+ * external payment-gateway callbacks (Razorpay), and an admin financial
+ * dashboard.
+ *
+ * <p><b>Authentication model:</b> JWT validation happens at the API Gateway.
+ * The gateway forwards {@code X-User-UUID} and {@code X-User-Role} headers
+ * which are converted into a Spring Security context by
+ * {@link com.sourabh.payment_service.config.HeaderRoleAuthenticationFilter}.
+ * Method-level authorisation is enforced via {@code @PreAuthorize}.
+ *
+ * @see com.sourabh.payment_service.service.PaymentService
+ */
 @RestController
 @RequestMapping("/api/payment")
 @RequiredArgsConstructor
 @Slf4j
-/**
- * REST API CONTROLLER - Handles HTTP Requests
- * 
- * This controller exposes REST endpoints for HTTP clients (API Gateway, web browsers).
- * Each endpoint method:
- *   1. Validates request parameters and body with @Valid
- *   2. Extracts user context from headers (X-User-UUID, X-User-Role)
- *   3. Delegates business logic to Service layer
- *   4. Returns JSON response via ResponseEntity
- * 
- * Authorization:
- *   - @PreAuthorize: Spring Security checks user role before method execution
- *   - Headers injected by API Gateway after JWT validation
- */
 public class PaymentController {
 
+    /** Delegate for all payment business logic. */
     private final PaymentService paymentService;
 
-    // =========================
-    // INITIATE PAYMENT (BUYER)
-    // =========================
+    /**
+     * Initiates a new payment for the authenticated buyer.
+     *
+     * <p>The buyer UUID is taken from the gateway-injected header, <b>not</b>
+     * from the request body, to prevent spoofing.
+     *
+     * @param request     validated payment request body
+     * @param httpRequest servlet request carrying gateway headers
+     * @return the gateway result string (e.g. {@code "Payment SUCCESS"} or
+     *         a Razorpay order ID when the payment is pending)
+     */
     @PreAuthorize("hasRole('BUYER')")
     @PostMapping
     public ResponseEntity<String> pay(
@@ -47,64 +58,15 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.initiatePayment(request, role, buyerUuid));
     }
 
-    // =========================
-    // GET MY PAYMENTS (BUYER paginated)
-    // =========================
-    @PreAuthorize("hasRole('BUYER')")
     /**
-
-     * API ENDPOINT
-
-     * 
-
-     * HTTP Method: GET
-
-     * 
-
-     * PURPOSE:
-
-     * Handles HTTP requests for this endpoint. Validates input, delegates to service
-
-     * layer for business logic, and returns JSON response.
-
-     * 
-
-     * PROCESS FLOW:
-
-     * 1. API Gateway forwards request after JWT validation
-
-     * 2. Spring deserializes JSON to request object
-
-     * 3. @Valid triggers bean validation (if present)
-
-     * 4. @PreAuthorize checks user role (if present)
-
-     * 5. Service layer executes business logic
-
-     * 6. Response object serialized to JSON
-
-     * 7. HTTP status code sent (200/201/400/403/404/500)
-
-     * 
-
-     * SECURITY:
-
-     * - JWT validation at API Gateway (user authenticated)
-
-     * - Role-based access via @PreAuthorize annotation
-
-     * - Input validation via @Valid and constraint annotations
-
-     * 
-
-     * ERROR HANDLING:
-
-     * - Service exceptions caught by GlobalExceptionHandler
-
-     * - Returns standardized error response with HTTP status
-
+     * Returns a paginated list of the authenticated buyer's own payments.
+     *
+     * @param page        zero-based page index (default 0)
+     * @param size        page size (default 10)
+     * @param httpRequest servlet request carrying the buyer UUID header
+     * @return paginated {@link PaymentResponse} list
      */
-
+    @PreAuthorize("hasRole('BUYER')")
     @GetMapping
     public ResponseEntity<PageResponse<PaymentResponse>> getMyPayments(
             @RequestParam(defaultValue = "0") int page,
@@ -114,9 +76,15 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getPaymentsByBuyer(buyerUuid, page, size));
     }
 
-    // =========================
-    // GET PAYMENT BY UUID (BUYER own / ADMIN any)
-    // =========================
+    /**
+     * Retrieves a single payment by its UUID.
+     *
+     * <p>Buyers may only view their own payments; admins can view any payment.
+     *
+     * @param uuid        the payment UUID path variable
+     * @param httpRequest servlet request carrying role and buyer UUID headers
+     * @return the matching {@link PaymentResponse}
+     */
     @PreAuthorize("hasAnyRole('BUYER', 'ADMIN')")
     @GetMapping("/{uuid}")
     public ResponseEntity<PaymentResponse> getPaymentByUuid(
@@ -127,9 +95,16 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getPaymentByUuid(uuid, role, buyerUuid));
     }
 
-    // =========================
-    // GET PAYMENT BY ORDER UUID (BUYER own / ADMIN any)
-    // =========================
+    /**
+     * Retrieves the payment associated with a given order UUID.
+     *
+     * <p>Access rules are the same as {@link #getPaymentByUuid}: buyers see
+     * only their own; admins see any.
+     *
+     * @param orderUuid   the order UUID path variable
+     * @param httpRequest servlet request carrying role and buyer UUID headers
+     * @return the matching {@link PaymentResponse}
+     */
     @PreAuthorize("hasAnyRole('BUYER', 'ADMIN')")
     @GetMapping("/order/{orderUuid}")
     public ResponseEntity<PaymentResponse> getPaymentByOrderUuid(
@@ -140,9 +115,15 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getPaymentByOrderUuid(orderUuid, role, buyerUuid));
     }
 
-    // =========================
-    // SELLER: MY PAYMENTS (paginated splits)
-    // =========================
+    /**
+     * Returns a paginated list of payments in which the authenticated seller
+     * has at least one {@link com.sourabh.payment_service.entity.PaymentSplit}.
+     *
+     * @param page        zero-based page index (default 0)
+     * @param size        page size (default 10)
+     * @param httpRequest servlet request carrying the seller UUID header
+     * @return paginated {@link PaymentResponse} list filtered by seller
+     */
     @PreAuthorize("hasRole('SELLER')")
     @GetMapping("/seller")
     public ResponseEntity<PageResponse<PaymentResponse>> getSellerPayments(
@@ -153,9 +134,13 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getSellerPayments(sellerUuid, page, size));
     }
 
-    // =========================
-    // SELLER: FINANCIAL DASHBOARD
-    // =========================
+    /**
+     * Returns the seller's financial dashboard containing aggregated earnings,
+     * pending payouts, and total fulfilled orders.
+     *
+     * @param httpRequest servlet request carrying the seller UUID header
+     * @return the {@link SellerDashboardResponse} for the authenticated seller
+     */
     @PreAuthorize("hasRole('SELLER')")
     @GetMapping("/seller/dashboard")
     public ResponseEntity<SellerDashboardResponse> getSellerDashboard(
@@ -164,51 +149,56 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getSellerDashboard(sellerUuid));
     }
 
-    // =========================
-    // PAYMENT GATEWAY CALLBACK (public URL, not auth-protected)
-    // =========================
+    /**
+     * Public webhook endpoint invoked by the payment gateway (e.g. Razorpay)
+     * when a payment's status changes asynchronously.
+     *
+     * <p>The method accepts the Razorpay callback payload and verifies the
+     * signature using HMAC-SHA256.  If verification passes and a
+     * {@code razorpay_payment_id} is present the payment is marked as
+     * successful; otherwise it is marked as failed.
+     *
+     * <p><b>Note:</b> This endpoint is <em>not</em> protected by
+     * {@code @PreAuthorize} because the caller is the external gateway,
+     * not an authenticated user.
+     *
+     * @param payload   the JSON body sent by the gateway
+     * @param signature optional {@code X-Razorpay-Signature} header
+     * @return HTTP 200 acknowledgement
+     */
     @PostMapping("/gateway/webhook")
     public ResponseEntity<Void> gatewayWebhook(
             @RequestBody Map<String, Object> payload,
             @RequestHeader(value = "X-Razorpay-Signature", required = false) String signature) {
-        // only Razorpay sends this header; other gateways may use different names
-        String orderId = (String) payload.get("razorpay_order_id");
+        String orderId  = (String) payload.get("razorpay_order_id");
         String paymentId = (String) payload.get("razorpay_payment_id");
-        String status = (String) payload.get("status");
+        String sigPayload = (String) payload.get("razorpay_signature");
+
+        String effectiveSig = signature != null ? signature : sigPayload;
 
         boolean verified = true;
-        if (signature != null) {
+        if (effectiveSig != null && orderId != null && paymentId != null) {
             verified = paymentService instanceof com.sourabh.payment_service.service.impl.PaymentServiceImpl ?
                     ((com.sourabh.payment_service.service.impl.PaymentServiceImpl) paymentService)
-                            .getPaymentGateway().verify(orderId, paymentId, signature)
+                            .getPaymentGateway().verify(orderId, paymentId, effectiveSig)
                     : true;
         }
-        if (verified) {
-            boolean success = "captured".equalsIgnoreCase(status) || "success".equalsIgnoreCase(status);
+
+        if (verified && orderId != null) {
+            boolean success = paymentId != null && !paymentId.isBlank();
             paymentService.handleGatewayCallback(orderId, success, paymentId);
         }
         return ResponseEntity.ok().build();
     }
 
-    // =========================
-    // ADMIN: FINANCIAL DASHBOARD
-    // =========================
+    /**
+     * Returns the platform-wide admin financial dashboard with gross revenue,
+     * platform earnings, delivery fees, seller payouts, and order counts.
+     *
+     * @return the {@link AdminDashboardResponse}
+     */
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/admin/dashboard")
-    /**
-     * GETADMINDASHBOARD - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the getAdminDashboard operation.
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<AdminDashboardResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @PreAuthorize - Security check before method execution
-     * @GetMapping - REST endpoint handler
-     *
-     */
     public ResponseEntity<AdminDashboardResponse> getAdminDashboard() {
         return ResponseEntity.ok(paymentService.getAdminDashboard());
     }

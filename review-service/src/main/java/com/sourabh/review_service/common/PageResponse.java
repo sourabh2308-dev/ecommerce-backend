@@ -5,50 +5,38 @@ import lombok.Getter;
 
 import java.util.List;
 
+/**
+ * Generic wrapper for paginated query results returned by review list endpoints.
+ *
+ * <p>Encapsulates the current page of items together with pagination metadata
+ * (page number, page size, total elements, total pages, last-page flag) so
+ * that API consumers can build page navigation without additional calls.
+ *
+ * <p>Used by {@link com.sourabh.review_service.controller.ReviewController}
+ * for the {@code GET /api/review/product/{productUuid}} and
+ * {@code GET /api/review/me} endpoints.
+ *
+ * @param <T> the element type contained in each page (e.g.&nbsp;{@code ReviewResponse})
+ */
 @Getter
 @Builder
-/**
- * DATA TRANSFER OBJECT (DTO) - Server Response Format
- * 
- * Defines the JSON structure returned to HTTP clients.
- * Built from Entity objects via mapper methods.
- * May include computed fields not in database.
- */
-/**
- * PAGE RESPONSE DTO - Paginated Results Container
- * 
- * PURPOSE:
- * Wraps paginated list results with metadata about pagination.
- * Used by all list endpoints that support pagination.
- * 
- * FIELDS:
- * - content: List of items (orders, products, users, etc.)
- * - page: Current page number (0-indexed)
- * - size: Items per page
- * - totalElements: Total count across all pages
- * - totalPages: Total number of pages
- * - last: Boolean indicating if this is the last page
- * 
- * EXAMPLE JSON:
- * {
- *   "content": [{...}, {...}, {...}],
- *   "page": 0,
- *   "size": 10,
- *   "totalElements": 47,
- *   "totalPages": 5,
- *   "last": false
- * }
- * 
- * CLIENT USAGE:
- * - Display items from "content" array
- * - Show page indicator: "Page 1 of 5"
- * - Enable/disable next/prev buttons based on "last" and "page"
- */
 public class PageResponse<T> {
+
+    /** The items belonging to the current page of results. */
     private List<T> content;
+
+    /** Zero-based index of the current page. */
     private int page;
+
+    /** Maximum number of items requested per page. */
     private int size;
+
+    /** Total number of matching items across all pages. */
     private long totalElements;
+
+    /** Total number of available pages. */
     private int totalPages;
+
+    /** {@code true} when the current page is the final page of results. */
     private boolean last;
 }

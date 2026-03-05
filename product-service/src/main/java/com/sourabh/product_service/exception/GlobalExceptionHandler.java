@@ -10,57 +10,35 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Centralised exception handler for the product-service.
+ *
+ * <p>Intercepts all exceptions thrown by controllers and services and converts
+ * them into a uniform {@link ErrorResponse} JSON payload.  This prevents raw
+ * stack traces from leaking to API consumers and ensures every error response
+ * follows the same structure.
+ *
+ * <h3>Exception &rarr; HTTP status mapping</h3>
+ * <table>
+ *   <tr><th>Exception</th><th>HTTP Status</th><th>Error Code</th></tr>
+ *   <tr><td>{@link ProductNotFoundException}</td><td>404</td><td>PRODUCT_NOT_FOUND</td></tr>
+ *   <tr><td>{@link UnauthorizedProductAccessException}</td><td>403</td><td>UNAUTHORIZED_PRODUCT_ACTION</td></tr>
+ *   <tr><td>{@link ProductStateException}</td><td>400</td><td>INVALID_PRODUCT_STATE</td></tr>
+ *   <tr><td>{@link MethodArgumentNotValidException}</td><td>400</td><td>VALIDATION_ERROR</td></tr>
+ *   <tr><td>{@link Exception} (catch-all)</td><td>500</td><td>INTERNAL_SERVER_ERROR</td></tr>
+ * </table>
+ */
 @RestControllerAdvice
 @Slf4j
-/**
- * GLOBAL EXCEPTION HANDLER - Centralized Error Response Generator
- * 
- * PURPOSE:
- * Intercepts all exceptions thrown in the application and converts them
- * to standardized JSON error responses. Prevents stack traces from leaking
- * to clients and ensures consistent error format across all endpoints.
- * 
- * ARCHITECTURE:
- * @RestControllerAdvice: Spring AOP that intercepts controller exceptions
- * @ExceptionHandler: Maps specific exception types to handler methods
- * 
- * ERROR RESPONSE FORMAT:
- * {
- *   "timestamp": "2026-02-25T10:30:00",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- * 
- * EXCEPTION MAPPING:
- * - Custom exceptions (NotFoundException, etc.) → Specific HTTP codes
- * - MethodArgumentNotValidException → 400 with validation details
- * - Generic Exception → 500 INTERNAL SERVER ERROR
- * 
- * LOGGING:
- * All exceptions logged at ERROR level for debugging and monitoring.
- * Stack traces captured for server-side analysis.
- */
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(ProductNotFoundException.class)
     /**
-     * HANDLENOTFOUND - Method Documentation
+     * Handles product-not-found lookups.
      *
-     * PURPOSE:
-     * This method handles the handleNotFound operation.
-     *
-     * PARAMETERS:
-     * @param ex - ProductNotFoundException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the exception thrown when a product UUID cannot be resolved
+     * @return a {@code 404 Not Found} response
      */
+    @ExceptionHandler(ProductNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(ProductNotFoundException ex) {
 
         return buildError(
@@ -70,23 +48,13 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(UnauthorizedProductAccessException.class)
     /**
-     * HANDLEUNAUTHORIZED - Method Documentation
+     * Handles unauthorised product access attempts.
      *
-     * PURPOSE:
-     * This method handles the handleUnauthorized operation.
-     *
-     * PARAMETERS:
-     * @param ex - UnauthorizedProductAccessException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the exception thrown when a user lacks permission
+     * @return a {@code 403 Forbidden} response
      */
+    @ExceptionHandler(UnauthorizedProductAccessException.class)
     public ResponseEntity<ErrorResponse> handleUnauthorized(UnauthorizedProductAccessException ex) {
 
         return buildError(
@@ -96,23 +64,14 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(ProductStateException.class)
     /**
-     * HANDLESTATE - Method Documentation
+     * Handles invalid product state transitions.
      *
-     * PURPOSE:
-     * This method handles the handleState operation.
-     *
-     * PARAMETERS:
-     * @param ex - ProductStateException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the exception thrown when an operation conflicts with the
+     *           product's current state
+     * @return a {@code 400 Bad Request} response
      */
+    @ExceptionHandler(ProductStateException.class)
     public ResponseEntity<ErrorResponse> handleState(ProductStateException ex) {
 
         return buildError(
@@ -122,23 +81,17 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * HANDLEVALIDATION - Method Documentation
+     * Handles Bean Validation failures triggered by {@code @Valid} on
+     * request DTOs.
      *
-     * PURPOSE:
-     * This method handles the handleValidation operation.
+     * <p>Each field error is formatted as {@code "fieldName : message"} and
+     * added to the {@link ErrorResponse#getDetails()} list.
      *
-     * PARAMETERS:
-     * @param ex - MethodArgumentNotValidException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the validation exception containing binding results
+     * @return a {@code 400 Bad Request} response with field-level details
      */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
 
         List<String> errors = ex.getBindingResult()
@@ -158,23 +111,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(Exception.class)
     /**
-     * HANDLEGENERIC - Method Documentation
+     * Catch-all handler for any unexpected or uncategorised exception.
      *
-     * PURPOSE:
-     * This method handles the handleGeneric operation.
+     * <p>The actual error is logged at {@code ERROR} level; clients receive
+     * a generic message to avoid exposing internal details.
      *
-     * PARAMETERS:
-     * @param ex - Exception value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the unexpected exception
+     * @return a {@code 500 Internal Server Error} response
      */
+    @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
 
         log.error("Unexpected error: {}", ex.getMessage());
@@ -186,6 +132,15 @@ public class GlobalExceptionHandler {
         );
     }
 
+    /**
+     * Helper that constructs an {@link ErrorResponse} wrapped in a
+     * {@link ResponseEntity} with the given HTTP status.
+     *
+     * @param code    machine-readable error code
+     * @param message human-readable error description
+     * @param status  HTTP status to return
+     * @return the fully-built response entity
+     */
     private ResponseEntity<ErrorResponse> buildError(
             String code,
             String message,

@@ -21,115 +21,38 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * ══════════════════════════════════════════════════════════════════════════════
- * RETURN SERVICE IMPLEMENTATION
- * ══════════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Manages order return/refund/exchange requests from customers.
- * This service orchestrates:
- *   1. Return request creation with validation (only delivered orders can be returned)
- *   2. Return approval/rejection by administrators
- *   3. Status progression (REQUESTED -> APPROVED/REJECTED -> REFUNDED/EXCHANGED)
- *   4. Automatic order status synchronization
- *   5. Refund amount tracking and override capability
- *   6. Pagination and filtering support for admin dashboards
- * 
- * KEY RESPONSIBILITIES:
- * ---------------------
- * - Validate return eligibility (order must be DELIVERED)
- * - Prevent duplicate returns for same order
- * - Create and track return requests with reason and type
- * - Manage return lifecycle (approval, rejection, completion)
- * - Update parent order status based on return decision
- * - Calculate and override refund amounts
- * - Provide customer-specific return history with pagination
- * - Provide admin view with filtering by status
- * 
- * RETURN TYPES:
- * ──────────
- * REFUND: Customer returns product, receives money back
- * EXCHANGE: Customer returns product, receives replacement instead
- * 
- * RETURN STATUSES:
- * ────────────
- * REQUESTED: Initial state when customer submits return request
- * APPROVED: Admin approves return (refund/exchange will be processed)
- * REJECTED: Admin rejects return (customer keeps product)
- * REFUNDED: Payment refunded to customer
- * EXCHANGED: Replacement product shipped to customer
- * 
- * VALIDATION RULES:
- * ──────────────
- * - Order ownership: Buyer UUID must match order's buyer UUID
- * - Order delivery: Order status must be DELIVERED (cannot return incomplete orders)
- * - No duplicates: Only one return request per order (prevent abuse)
- * - Return type: Must be valid enum (REFUND or EXCHANGE)
- * 
- * DEPENDENCIES:
- * ──────────────
- * - ReturnRequestRepository: JPA repository for return request CRUD
- * - OrderRepository: Fetches and updates order status
- * 
- * ANNOTATIONS:
- * ─────────────
- * @Service: Marks class as Spring service layer component
- * @RequiredArgsConstructor: Lombok generates constructor for final fields
- * @Transactional: Default for methods that modify state
- * @Transactional(readOnly = true): Optimizes query-only methods
- * 
- * ══════════════════════════════════════════════════════════════════════════════
- * 
- * @author Sourabh
- * @version 1.0
- * @since 2026-02-26
+ * Manages the lifecycle of order return and exchange requests.
+ *
+ * <p>Supports two return types: {@code REFUND} (money back) and
+ * {@code EXCHANGE} (replacement product). Requests follow the status
+ * progression {@code REQUESTED → APPROVED/REJECTED → REFUNDED/EXCHANGED},
+ * with each transition synchronising the parent order's status.</p>
+ *
+ * <p>Only {@code DELIVERED} orders are eligible for return, and duplicate
+ * return requests for the same order are rejected.</p>
+ *
+ * @see ReturnService
+ * @see ReturnRequest
  */
 @Service
 @RequiredArgsConstructor
 public class ReturnServiceImpl implements ReturnService {
 
+    /** JPA repository for {@link ReturnRequest} persistence. */
     private final ReturnRequestRepository returnRequestRepository;
+    /** JPA repository for querying and updating parent orders. */
     private final OrderRepository orderRepository;
 
     /**
-     * Initiate a return/exchange request for a delivered order.
-     * 
-     * PURPOSE:
-     * Creates a new return request after comprehensive validation.
-     * Only delivered orders can be returned, preventing abuse and incomplete returns.
-     * 
-     * VALIDATION SEQUENCE:
-     * 1. Order exists and not deleted (or throws RuntimeException)
-     * 2. Requesting buyer is the order's actual buyer (ownership check)
-     * 3. Order status is DELIVERED (cannot return pending, cancelled, etc.)
-     * 4. No existing return request for this order (prevent duplicates)
-     * 
-     * PROCESS FLOW:
-     * 1. Update parent order status to RETURN_REQUESTED
-     * 2. Store return type and reason on order
-     * 3. Create ReturnRequest entity with:
-     *    - Order UUID (link to parent order)
-     *    - Buyer UUID (for audit and authorization)
-     *    - Return type (REFUND or EXCHANGE)
-     *    - Reason (customer explanation)
-     *    - Refund amount (defaults to full order total, can be overridden by admin)
-     * 4. Save return request to database
-     * 5. Return response with return request details
-     * 
-     * @param buyerUuid UUID of buyer initiating return (from authentication token)
-     * @param request ReturnRequestDto containing:
-     *        - orderUuid: UUID of order to return
-     *        - returnType: Either "REFUND" or "EXCHANGE"
-     *        - reason: Customer explanation for return (e.g., "Wrong color", "Defective")
-     * 
-     * @return ReturnResponse with created return request UUID and status (REQUESTED)
-     * 
-     * @throws RuntimeException if:
-     *         - Order not found or marked as deleted
-     *         - Buyer UUID doesn't match order's buyer
-     *         - Order not in DELIVERED status
-     *         - Return already exists for this order
+     * {@inheritDoc}
+     *
+     * <p>Validates order ownership, delivery status, and duplicate-return checks
+     * before creating the {@link ReturnRequest}. The parent order status is set
+     * to {@code RETURN_REQUESTED} and the refund amount defaults to the full
+     * order total (overridable later by an admin).</p>
+     *
+     * @throws RuntimeException if the order is not found, not owned by the buyer,
+     *                          not delivered, or already has a return request
      */
     @Override
     @Transactional
@@ -162,22 +85,10 @@ public class ReturnServiceImpl implements ReturnService {
     }
 
     /**
-     * Approve a return request and authorize refund/exchange.
-     * 
-     * PURPOSE:
-     * Admin approves return request, permitting refund/exchange processing.
-     * Return status moves from REQUESTED to APPROVED.
-     * Admin can override refund amount (e.g., partial refund for damage).
-     * 
-     * @param returnUuid UUID of return request to approve
-     * @param adminNotes Administrative notes (approval reason, refund justification, etc.)
-     * @param refundAmount Optional refund amount (overrides order total if set).
-     *                      If null, uses refund amount set at request time.
-     *                      Useful for partial refunds or damage deductions.
-     * 
-     * @return ReturnResponse with updated return status (APPROVED) and admin notes
-     * 
-     * @throws RuntimeException if return request not found
+     * {@inheritDoc}
+     *
+     * <p>Sets status to {@code APPROVED}. If {@code refundAmount} is non-null
+     * it overrides the original amount, enabling partial refunds.</p>
      */
     @Override
     @Transactional
@@ -190,19 +101,10 @@ public class ReturnServiceImpl implements ReturnService {
     }
 
     /**
-     * Reject a return request and keep order as-is.
-     * 
-     * PURPOSE:
-     * Admin rejects return request. Return status moves to REJECTED.
-     * Parent order status updated to RETURN_REJECTED.
-     * No refund/exchange will be processed.
-     * 
-     * @param returnUuid UUID of return request to reject
-     * @param adminNotes Reason for rejection (e.g., "Return window expired", "Item not defective")
-     * 
-     * @return ReturnResponse with updated status (REJECTED) and resolution timestamp
-     * 
-     * @throws RuntimeException if return request not found
+     * {@inheritDoc}
+     *
+     * <p>Sets status to {@code REJECTED}, records a resolution timestamp,
+     * and moves the parent order to {@code RETURN_REJECTED}.</p>
      */
     @Override
     @Transactional
@@ -212,7 +114,6 @@ public class ReturnServiceImpl implements ReturnService {
         rr.setAdminNotes(adminNotes);
         rr.setResolvedAt(LocalDateTime.now());
 
-        // Restore order status
         orderRepository.findByUuidAndIsDeletedFalse(rr.getOrderUuid())
                 .ifPresent(order -> {
                     order.setStatus(OrderStatus.RETURN_REJECTED);
@@ -223,27 +124,12 @@ public class ReturnServiceImpl implements ReturnService {
     }
 
     /**
-     * Update return request status to next lifecycle state.
-     * 
-     * PURPOSE:
-     * Transitions return request through status pipeline:
-     * REQUESTED -> APPROVED -> REFUNDED/EXCHANGED
-     * Or: REQUESTED -> REJECTED (handled by rejectReturn())
-     * 
-     * BEHAVIOR:
-     * - When transitioning to REFUNDED or EXCHANGED:
-     *   1. Sets resolvedAt timestamp (marks as completed)
-     *   2. Updates parent order status accordingly:
-     *      - REFUNDED -> order status becomes REFUND_ISSUED
-     *      - EXCHANGED -> order status becomes EXCHANGE_ISSUED
-     * 
-     * @param returnUuid UUID of return request to update
-     * @param status New status (must be valid ReturnStatus enum value:
-     *               REQUESTED, APPROVED, REJECTED, REFUNDED, EXCHANGED)
-     * 
-     * @return ReturnResponse with updated status and resolved timestamp (if applicable)
-     * 
-     * @throws RuntimeException if return not found or status invalid
+     * {@inheritDoc}
+     *
+     * <p>When the new status is {@code REFUNDED} or {@code EXCHANGED}, a
+     * resolution timestamp is recorded and the parent order status is
+     * updated to {@code REFUND_ISSUED} or {@code EXCHANGE_ISSUED}
+     * respectively.</p>
      */
     @Override
     @Transactional
@@ -261,45 +147,14 @@ public class ReturnServiceImpl implements ReturnService {
         return mapToResponse(returnRequestRepository.save(rr));
     }
 
-    /**
-     * Fetch a single return request by UUID.
-     * 
-     * PURPOSE:
-     * Retrieves detailed information about a specific return request.
-     * Used in return detail pages and admin dashboards.
-     * 
-     * @param returnUuid UUID of return request to fetch
-     * 
-     * @return ReturnResponse with all return request details
-     * 
-     * @throws RuntimeException if return request not found
-     */
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public ReturnResponse getReturn(String returnUuid) {
         return mapToResponse(findReturn(returnUuid));
     }
 
-    /**
-     * Fetch paginated list of return requests for a specific buyer.
-     * 
-     * PURPOSE:
-     * Provides customer with history of their return requests in order timeline.
-     * Used in customer portal / my orders / return history page.
-     * Results sorted by creation date (newest first).
-     * 
-     * @param buyerUuid UUID of buyer whose returns to fetch
-     * @param page Zero-indexed page number (0 = first page)
-     * @param size Number of results per page (e.g., 10, 20)
-     * 
-     * @return PageResponse containing:
-     *         - content: List of return requests for this buyer
-     *         - page: Current page number
-     *         - size: Page size
-     *         - totalElements: Total returns for this buyer
-     *         - totalPages: Total pages available
-     *         - last: Whether this is the last page
-     */
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ReturnResponse> getMyReturns(String buyerUuid, int page, int size) {
@@ -308,21 +163,7 @@ public class ReturnServiceImpl implements ReturnService {
         return toPageResponse(pg);
     }
 
-    /**
-     * Fetch paginated list of all return requests with optional status filter.
-     * 
-     * PURPOSE:
-     * Admin view for return request management.
-     * Filter by status to focus on pending approvals, rejected, refunded, etc.
-     * Results sorted by creation date (newest first).
-     * 
-     * @param status Optional status filter (null or blank = no filter, returns all).
-     *               Valid values: REQUESTED, APPROVED, REJECTED, REFUNDED, EXCHANGED
-     * @param page Zero-indexed page number (0 = first page)
-     * @param size Number of results per page
-     * 
-     * @return PageResponse with filtered/paginated return requests
-     */
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ReturnResponse> getAllReturns(String status, int page, int size) {
@@ -336,13 +177,22 @@ public class ReturnServiceImpl implements ReturnService {
         return toPageResponse(pg);
     }
 
-    // ─── Helpers ───
-
+    /**
+     * Looks up a {@link ReturnRequest} by UUID.
+     *
+     * @param uuid return-request UUID
+     * @return the entity
+     * @throws RuntimeException if not found
+     */
     private ReturnRequest findReturn(String uuid) {
         return returnRequestRepository.findByUuid(uuid)
                 .orElseThrow(() -> new RuntimeException("Return request not found"));
     }
 
+    /**
+     * Converts a Spring Data {@link Page} of return requests into a
+     * {@link PageResponse} DTO.
+     */
     private PageResponse<ReturnResponse> toPageResponse(Page<ReturnRequest> pg) {
         List<ReturnResponse> content = pg.getContent().stream().map(this::mapToResponse).toList();
         return PageResponse.<ReturnResponse>builder()
@@ -355,6 +205,7 @@ public class ReturnServiceImpl implements ReturnService {
                 .build();
     }
 
+    /** Maps a {@link ReturnRequest} entity to its API response DTO. */
     private ReturnResponse mapToResponse(ReturnRequest rr) {
         return ReturnResponse.builder()
                 .uuid(rr.getUuid())

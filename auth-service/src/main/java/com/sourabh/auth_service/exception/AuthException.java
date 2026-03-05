@@ -1,29 +1,20 @@
 package com.sourabh.auth_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Thrown when an authentication operation fails &ndash; for example, invalid
+ * credentials, expired or revoked tokens, or password-reset failures.
+ *
+ * <p>Handled by
+ * {@link GlobalExceptionHandler#handleAuthException(AuthException)},
+ * which returns HTTP 401 Unauthorized with an {@code AUTH_ERROR} code.</p>
  */
 public class AuthException extends RuntimeException {
+
+    /**
+     * Constructs an {@code AuthException} with the given detail message.
+     *
+     * @param message description of the authentication failure
+     */
     public AuthException(String message) {
         super(message);
     }

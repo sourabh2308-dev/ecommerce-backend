@@ -5,33 +5,32 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 
+/**
+ * Spring Boot entry point for the <strong>review-service</strong> microservice.
+ *
+ * <p>Bootstraps the Spring application context, component-scanning, and
+ * auto-configuration for the review domain. Enables:
+ * <ul>
+ *   <li>{@link EnableJpaAuditing} — automatic {@code createdAt} /
+ *       {@code updatedAt} timestamps on JPA entities.</li>
+ *   <li>{@link EnableFeignClients} — classpath scanning for Feign client
+ *       interfaces (e.g.&nbsp;{@link com.sourabh.review_service.feign.OrderServiceClient}).</li>
+ * </ul>
+ *
+ * <p>The application listens on the port defined by {@code server.port}
+ * (default {@code 8080}) and connects to PostgreSQL, Redis, Kafka, Eureka,
+ * and Config Server as configured in {@code application.properties}.
+ */
 @SpringBootApplication
 @EnableJpaAuditing
 @EnableFeignClients
-/**
- * MAIN APPLICATION ENTRY POINT
- * 
- * This is the Spring Boot application entry point for this microservice.
- * Enables component scanning, sets up Spring contexts, and initializes all beans.
- */
 public class ReviewServiceApplication {
 
     /**
-     * MAIN - Method Documentation
+     * JVM entry point. Delegates to {@link SpringApplication#run} to
+     * initialise and start the embedded servlet container.
      *
-     * PURPOSE:
-     * This method handles the main operation.
-     *
-     * PARAMETERS:
-     * @param args - String[] value
-     *
-     * RETURN VALUE:
-     * @return static void - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @EnableJpaAuditing - Applied to this method
-     * @EnableFeignClients - Applied to this method
-     *
+     * @param args command-line arguments (forwarded to Spring Boot)
      */
     public static void main(String[] args) {
         SpringApplication.run(ReviewServiceApplication.class, args);

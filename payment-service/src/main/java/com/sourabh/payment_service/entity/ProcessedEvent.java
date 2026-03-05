@@ -9,7 +9,19 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * Tracks processed Kafka event IDs to provide idempotent event consumption.
+ * JPA entity that records which Kafka event IDs have already been consumed,
+ * providing <b>idempotent event processing</b>.
+ *
+ * <p>Before processing an incoming {@code OrderCreatedEvent}, the consumer
+ * checks whether a {@code ProcessedEvent} with the same {@link #eventId}
+ * already exists.  If it does, the event is silently skipped, preventing
+ * duplicate payment creation when Kafka delivers the same message more
+ * than once (at-least-once guarantee).
+ *
+ * <p>A unique index on {@code event_id} enforces the constraint at the
+ * database level as an additional safety net.
+ *
+ * @see com.sourabh.payment_service.kafka.consumer.OrderEventConsumer
  */
 @Entity
 @Table(name = "processed_events", indexes = {
@@ -21,73 +33,20 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class ProcessedEvent {
 
+    /** Auto-generated primary key. */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
-    /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
-     */
-
-
+    /** Unique identifier of the Kafka event (carried inside the event payload). */
     @Column(name = "event_id", nullable = false, unique = true, length = 64)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String eventId;
 
+    /** Kafka topic from which the event was consumed (e.g. {@code order.created}). */
     @Column(name = "topic", nullable = false, length = 128)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String topic;
 
+    /** Timestamp when the event was successfully processed. */
     @Column(name = "processed_at", nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private LocalDateTime processedAt;
 }

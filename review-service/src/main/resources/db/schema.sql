@@ -1,2 +1,16 @@
--- review-service: unified schema for JPA auto-creation
--- This file is for documentation only; JPA will create the schema.
+-- ──────────────────────────────────────────────────────────────
+-- review-service: Database Schema Reference
+-- ──────────────────────────────────────────────────────────────
+-- This file serves as documentation only.  JPA/Hibernate manages
+-- the actual schema creation based on entity annotations in:
+--   - Review.java          → "review" table
+--   - ReviewImage.java     → "review_image" table
+--   - ReviewVote.java      → "review_vote" table
+--
+-- ddl-auto is set to "validate" in application.properties, which
+-- verifies that the existing database schema matches the entity
+-- mappings at application startup without making changes.
+--
+-- For the initial table creation see init.sql at the project root,
+-- which is executed by the PostgreSQL container on first start.
+-- ──────────────────────────────────────────────────────────────

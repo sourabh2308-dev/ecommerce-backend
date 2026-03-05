@@ -12,41 +12,44 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * REST Controller for order-related dashboard metrics.
- * 
- * <p>Provides aggregate statistics and KPIs for:
+ * REST controller that provides aggregated dashboard metrics for the
+ * e-commerce platform's order subsystem.
+ *
+ * <p>Two dashboards are exposed:
  * <ul>
- *   <li>ADMIN: Platform-wide order metrics (total orders, revenue, returns)</li>
- *   <li>SELLER: Seller-specific order metrics (their orders, deliveries, returns)</li>
+ *   <li><strong>Admin dashboard</strong> — platform-wide KPIs such as total
+ *       orders, confirmed/delivered/cancelled counts, return requests, and
+ *       cumulative revenue.</li>
+ *   <li><strong>Seller dashboard</strong> — seller-scoped KPIs including
+ *       total orders, pending/delivered/returned counts, and seller revenue.</li>
  * </ul>
- * 
- * <p>Used by frontend dashboards to display business intelligence
- * and performance metrics.
- * 
+ *
+ * <p>Base path: {@code /api/order/dashboard}</p>
+ *
  * @author Sourabh
  * @version 1.0
  * @since 2026-02-26
+ * @see OrderRepository
+ * @see ReturnRequestRepository
  */
 @RestController
 @RequestMapping("/api/order/dashboard")
 @RequiredArgsConstructor
 public class DashboardController {
 
+    /** Repository for querying order counts and revenue aggregates. */
     private final OrderRepository orderRepository;
+
+    /** Repository for querying return-request counts. */
     private final ReturnRequestRepository returnRequestRepository;
 
     /**
-     * Retrieves platform-wide order dashboard metrics for admins.
-     * 
-     * <p>Metrics included:
-     * <ul>
-     *   <li>Total orders in the system</li>
-     *   <li>Confirmed, delivered, cancelled order counts</li>
-     *   <li>Total return requests</li>
-     *   <li>Total revenue generated</li>
-     * </ul>
-     * 
-     * @return ResponseEntity with admin dashboard statistics
+     * Retrieves platform-wide order dashboard metrics.
+     *
+     * <p>Metrics include total orders, counts by status (confirmed, delivered,
+     * cancelled), total return requests, and cumulative revenue.</p>
+     *
+     * @return {@link ResponseEntity} containing an {@link AdminDashboardResponse}
      */
     @GetMapping("/admin")
     @PreAuthorize("hasRole('ADMIN')")
@@ -63,18 +66,13 @@ public class DashboardController {
 
     /**
      * Retrieves seller-specific order dashboard metrics.
-     * 
-     * <p>Metrics included:
-     * <ul>
-     *   <li>Total orders for this seller</li>
-     *   <li>Pending (unconfirmed) orders</li>
-     *   <li>Delivered orders</li>
-     *   <li>Returned orders</li>
-     *   <li>Total revenue for this seller</li>
-     * </ul>
-     * 
-     * @param sellerUuid the UUID of the seller from JWT
-     * @return ResponseEntity with seller dashboard statistics
+     *
+     * <p>Metrics include the seller's total orders (across several statuses),
+     * pending orders, delivered orders, returned orders, and total revenue.</p>
+     *
+     * @param sellerUuid UUID of the authenticated seller, extracted from the
+     *                   {@code X-User-UUID} header
+     * @return {@link ResponseEntity} containing a {@link SellerDashboardResponse}
      */
     @GetMapping("/seller")
     @PreAuthorize("hasRole('SELLER')")

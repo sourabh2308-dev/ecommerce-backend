@@ -28,250 +28,83 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Core implementation of {@link PaymentService}.
+ *
+ * <p>Handles the complete payment lifecycle: initiation via a pluggable
+ * {@link PaymentGateway}, processing of asynchronous gateway callbacks,
+ * buyer/seller/admin query operations, and financial dashboard
+ * aggregations.
+ *
+ * <h3>Transaction semantics</h3>
+ * The class-level {@code @Transactional} annotation ensures that every
+ * public method runs inside a database transaction.  Read-only methods
+ * override with {@code @Transactional(readOnly = true)} for optimised
+ * connection handling.
+ *
+ * <h3>Revenue split model</h3>
+ * <ul>
+ *   <li>Platform fee — configurable percentage
+ *       ({@code payment.platform-fee-percent}, default 10%).</li>
+ *   <li>Delivery fee — flat per-item charge
+ *       ({@code payment.delivery-fee-per-item}, default ₹30).</li>
+ *   <li>Seller payout — {@code itemTotal - platformFee}.</li>
+ * </ul>
+ *
+ * <h3>Saga integration</h3>
+ * After a payment reaches a terminal status ({@code SUCCESS} or
+ * {@code FAILED}) a {@link PaymentCompletedEvent} is published to the
+ * {@code payment.completed} Kafka topic so that the order-service can
+ * confirm or compensate.
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional
 @Slf4j
-/**
- * ═══════════════════════════════════════════════════════════════════════════
- * PAYMENT SERVICE IMPLEMENTATION - Payment Processing & Revenue Distribution
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Handles payment processing, revenue split calculation (platform commission + seller payouts),
- * and payment lifecycle management. Integrates with order-service via Kafka events in a
- * saga-orchestrated distributed transaction pattern.
- * 
- * KEY RESPONSIBILITIES:
- * --------------------
- * 1. Payment Initiation:
- *    - Process payment requests from buyers
- *    - Calculate total amount: (item prices + delivery fees + platform commission)
- *    - Delegate to a configurable payment gateway implementation (mock by default,
- *      or Razorpay sandbox when enabled) rather than hard‑coded simulation.  This
- *      abstraction makes end-to-end tests with a free Razorpay test account
- *      possible.
- *    - Create Payment entity with status PENDING
- * 
- * 2. Revenue Split Calculation:
- *    - Platform commission: Configurable % of each item (default 10%)
- *    - Delivery fee: Flat fee per item (default ₹30)
- *    - Seller payout: item price - platform commission
- *    - Create PaymentSplit records for each seller in the order
- * 
- * 3. Payment Completion Flow:
- *    - Update payment status: PENDING → COMPLETED/FAILED
- *    - Create payment splits for each seller
- *    - Publish payment.completed event to Kafka
- *    - order-service listens and updates order status
- * 
- * 4. Buyer & Seller Views:
- *    - Buyers: View all their payments (paginated)
- *    - Sellers: View payments where they received payouts
- *    - Filter by status, date range, order UUID
- * 
- * 5. Event-Driven Architecture:
- *    - Listens: order.created events (triggered by order-service)
- *    - Publishes: payment.completed events (consumed by order-service)
- *    - Ensures eventual consistency across microservices
- * 
- * ARCHITECTURE PATTERNS:
- * ----------------------
- * - Service Layer Pattern: Business logic separated from controller
- * - Saga Pattern: Distributed transaction coordination via events
- *   * Orchestration: order-service creates order → payment-service processes payment
- *   * Compensation: payment fails → order-service cancels order + restores stock
- * - Event Sourcing: Payment status changes tracked with audit trail
- * - Repository Pattern: JPA abstracts payment/split data access
- * 
- * ANNOTATIONS EXPLAINED:
- * ----------------------
- * @Service:
- *   - Spring-managed service bean
- *   - Registered in application context for dependency injection
- * 
- * @Transactional:
- *   - All methods run in database transaction
- *   - Rollback on RuntimeException (e.g., PaymentException)
- *   - Ensures atomicity: payment + splits saved together or rolled back
- * 
- * @Value("${property:default}"):
- *   - Injects configuration from application.properties
- *   - Falls back to default if property not defined
- *   - Examples:
- *       payment.platform-fee-percent: 10.0 (10% commission)
- *       payment.delivery-fee-per-item: 30.0 (₹30 per item)
- * 
- * @KafkaListener:
- *   - Subscribes to Kafka topic
- *   - Automatically deserializes JSON to event object
- *   - Processes event in consumer thread pool
- *   - Example: Listen to "order.created" topic
- * 
- * REVENUE SPLIT CALCULATION:
- * --------------------------
- * For each order item:
- *   1. Item Total = quantity × price
- *   2. Platform Commission = Item Total × (platformFeePercent / 100)
- *   3. Delivery Fee = deliveryFeePerItem × quantity
- *   4. Seller Payout = Item Total - Platform Commission
- *   5. Buyer Pays = Item Total + Delivery Fee
- * 
- * Example:
- *   Item: Laptop, Price: ₹50,000, Quantity: 2
- *   Platform Commission: 10%
- *   Delivery Fee: ₹30/item
- * 
- *   Calculation:
- *   - Item Total: 50000 × 2 = ₹100,000
- *   - Platform Commission: 100000 × 0.10 = ₹10,000
- *   - Delivery Fee: 30 × 2 = ₹60
- *   - Seller Receives: 100000 - 10000 = ₹90,000
- *   - Buyer Pays: 100000 + 60 = ₹100,060
- * 
- * PAYMENT STATUS LIFECYCLE:
- * -------------------------
- * PENDING → COMPLETED (successful payment)
- * PENDING → FAILED (payment gateway error, insufficient balance)
- * COMPLETED → REFUNDED (buyer cancels within refund window)
- * 
- * SAGA PATTERN FLOW:
- * ------------------
- * Happy Path:
- *   1. Buyer places order → order-service creates order (status = CREATED)
- *   2. order-service publishes order.created event to Kafka
- *   3. payment-service listens to order.created event
- *   4. payment-service processes payment (creates Payment + PaymentSplits)
- *   5. payment-service publishes payment.completed event
- *   6. order-service listens to payment.completed event
- *   7. order-service updates order (status = CONFIRMED, paymentStatus = PAID)
- * 
- * Compensation Path (Payment Fails):
- *   1-3. Same as happy path
- *   4. payment-service processes payment → FAILED
- *   5. payment-service publishes payment.failed event
- *   6. order-service listens to payment.failed event
- *   7. order-service compensates:
- *      - Update order (status = CANCELLED, paymentStatus = FAILED)
- *      - Restore product stock via product-service Feign call
- * 
- * KAFKA EVENT SCHEMA:
- * -------------------
- * order.created Event:
- * {
- *   "orderUuid": "abc-123",
- *   "buyerUuid": "buyer-456",
- *   "totalAmount": 100060.0,
- *   "items": [
- *     {
- *       "productUuid": "prod-789",
- *       "sellerUuid": "seller-999",
- *       "quantity": 2,
- *       "price": 50000.0
- *     }
- *   ]
- * }
- * 
- * payment.completed Event:
- * {
- *   "paymentUuid": "pay-111",
- *   "orderUuid": "abc-123",
- *   "status": "COMPLETED",
- *   "amount": 100060.0,
- *   "processedAt": "2026-02-25T10:30:00"
- * }
- * 
- * ERROR HANDLING:
- * ---------------
- * - PaymentNotFoundException: Payment UUID not found
- * - PaymentAccessException: User not authorized to view payment
- * - Kafka publish failures: Retry mechanism (configured in KafkaTemplate)
- * - Payment gateway errors: Set status = FAILED, publish failure event
- * 
- * EXAMPLE FLOWS:
- * --------------
- * 
- * Flow 1: Process Order Created Event
- * handleOrderCreatedEvent(OrderCreatedEvent)
- * → Extract order details (UUID, buyer, total, items)
- * → Create Payment entity (status = PENDING, amount = total)
- * → For each item:
- *    → Calculate platform commission
- *    → Calculate delivery fee
- *    → Calculate seller payout
- *    → Create PaymentSplit (sellerUuid, amount, status = PENDING)
- * → Simulate payment processing (in production: call payment gateway API)
- * → If success:
- *    → Update payment.status = COMPLETED
- *    → Update all splits.status = COMPLETED
- *    → Publish payment.completed event to Kafka
- * → If failure:
- *    → Update payment.status = FAILED
- *    → Publish payment.failed event to Kafka
- * → Commit transaction
- * 
- * Flow 2: Get Buyer Payments
- * getMyPayments(buyerUuid, page, size)
- * → Create Pageable (page, size, sort by createdAt DESC)
- * → Query: paymentRepository.findByBuyerUuid(buyerUuid, pageable)
- * → Convert Page<Payment> to Page<PaymentResponse>
- * → Wrap in PageResponse
- * → Return PageResponse
- * 
- * Flow 3: Get Seller Earnings
- * getSellerEarnings(sellerUuid, page, size)
- * → Create Pageable (page, size, sort by createdAt DESC)
- * → Query: paymentSplitRepository.findBySellerUuid(sellerUuid, pageable)
- * → Filter: status = COMPLETED
- * → Convert to PaymentSplitResponse (show seller payout amount)
- * → Return PageResponse
- * 
- * TESTING NOTES:
- * --------------
- * - Mock payment gateway calls
- * - Verify revenue split calculations with various scenarios
- * - Test Kafka event publishing with EmbeddedKafka
- * - Verify transaction rollback on payment failures
- * - Test saga compensation: order cancellation on payment failure
- */
 public class PaymentServiceImpl implements PaymentService {
 
+    /** JPA repository for {@link Payment} entities. */
     private final PaymentRepository paymentRepository;
+
+    /** JPA repository for {@link PaymentSplit} entities and aggregation queries. */
     private final PaymentSplitRepository paymentSplitRepository;
+
+    /** Kafka producer used to publish {@link PaymentCompletedEvent} messages. */
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    /** Platform commission percentage — configurable via application.properties */
+    /**
+     * Platform commission percentage applied to every order item.
+     * Injected from {@code payment.platform-fee-percent} (default 10.0).
+     */
     @Value("${payment.platform-fee-percent:10.0}")
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
     private double platformFeePercent;
 
-    /** Flat delivery fee per item — configurable via application.properties */
+    /**
+     * Flat delivery fee charged per item unit.
+     * Injected from {@code payment.delivery-fee-per-item} (default 30.0).
+     */
     @Value("${payment.delivery-fee-per-item:30.0}")
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
     private double deliveryFeePerItem;
 
+    /** Kafka topic for publishing payment completion events. */
     private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
 
-    private final PaymentGateway paymentGateway; // new dependency
+    /** Pluggable payment gateway (mock or Razorpay, selected by config). */
+    private final PaymentGateway paymentGateway;
 
-    // ─────────────────────────────────────────────
-    // INITIATE PAYMENT (Buyer manual flow)
-    // ─────────────────────────────────────────────
-
-    @Override
     /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
+     * {@inheritDoc}
+     *
+     * <p>Validates the caller's role, persists an {@code INITIATED}
+     * payment, delegates to the configured {@link PaymentGateway}, and
+     * transitions the payment to its final status.  A Kafka event is
+     * published only for terminal statuses; {@code PENDING} payments
+     * wait for the gateway callback.
+     *
+     * @throws PaymentAccessException if the caller role is not
+     *                                {@code BUYER}
      */
+    @Override
     public String initiatePayment(PaymentRequest request, String role, String buyerUuid) {
 
         if (!"BUYER".equalsIgnoreCase(role)) {
@@ -293,18 +126,16 @@ public class PaymentServiceImpl implements PaymentService {
 
         paymentRepository.save(payment);
 
-        // delegate to gateway
         String gatewayResult = paymentGateway.initiate(request.getAmount(), "INR", paymentUuid);
 
-        // interpret result
         PaymentStatus finalStatus;
         if (gatewayResult.startsWith("Payment SUCCESS")) {
             finalStatus = PaymentStatus.SUCCESS;
         } else if (gatewayResult.startsWith("Payment FAILED")) {
             finalStatus = PaymentStatus.FAILED;
         } else {
-            // assume external order id (e.g. Razorpay) -> leave pending
             finalStatus = PaymentStatus.PENDING;
+            payment.setGatewayOrderId(gatewayResult);
         }
 
         payment.setStatus(finalStatus);
@@ -312,52 +143,67 @@ public class PaymentServiceImpl implements PaymentService {
 
         log.info("Payment processed: orderUuid={}, status={}", request.getOrderUuid(), finalStatus);
 
-        kafkaTemplate.send(TOPIC_PAYMENT_COMPLETED,
-                new PaymentCompletedEvent(request.getOrderUuid(), finalStatus.name(), paymentUuid));
+        if (finalStatus != PaymentStatus.PENDING) {
+            kafkaTemplate.send(TOPIC_PAYMENT_COMPLETED,
+                    new PaymentCompletedEvent(request.getOrderUuid(), finalStatus.name(), paymentUuid));
+            log.info("PaymentCompletedEvent published: orderUuid={}, status={}", request.getOrderUuid(), finalStatus);
+        } else {
+            log.info("Payment PENDING (awaiting gateway callback): orderUuid={}, gatewayOrderId={}",
+                    request.getOrderUuid(), gatewayResult);
+        }
 
-        log.info("PaymentCompletedEvent published: orderUuid={}, status={}", request.getOrderUuid(), finalStatus);
         return gatewayResult;
     }
 
-    // ─────────────────────────────────────────────
-    // GATEWAY CALLBACK HANDLING
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Looks up the payment by gateway order ID first
+     * (e.g. Razorpay {@code order_xxx}), falling back to the internal
+     * order UUID for backward compatibility.  Updates the status and
+     * publishes a Kafka event keyed on the <em>internal</em>
+     * {@code orderUuid} so the order-service can correlate correctly.
+     *
+     * @throws PaymentNotFoundException if no matching payment exists
+     */
     @Override
-    public void handleGatewayCallback(String orderUuid, boolean success, String gatewayResponse) {
-        Payment payment = paymentRepository.findByOrderUuid(orderUuid)
-                .orElseThrow(() -> new PaymentNotFoundException("No payment for order " + orderUuid));
+    public void handleGatewayCallback(String gatewayOrderId, boolean success, String gatewayResponse) {
+        Payment payment = paymentRepository.findByGatewayOrderId(gatewayOrderId)
+                .or(() -> paymentRepository.findByOrderUuid(gatewayOrderId))
+                .orElseThrow(() -> new PaymentNotFoundException("No payment for gateway order " + gatewayOrderId));
 
         PaymentStatus finalStatus = success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
         payment.setStatus(finalStatus);
         paymentRepository.save(payment);
 
-        log.info("[GATEWAY CALLBACK] order={}, success={}, response={}", orderUuid, success, gatewayResponse);
+        log.info("[GATEWAY CALLBACK] gatewayOrderId={}, internalOrder={}, success={}, response={}",
+                gatewayOrderId, payment.getOrderUuid(), success, gatewayResponse);
 
         kafkaTemplate.send(TOPIC_PAYMENT_COMPLETED,
-                new PaymentCompletedEvent(orderUuid, finalStatus.name(), payment.getUuid()));
+                new PaymentCompletedEvent(payment.getOrderUuid(), finalStatus.name(), payment.getUuid()));
     }
 
     /**
-     * Exposed for controller verification; callers should prefer using the
-     * dedicated callback handler instead.
+     * Returns the active {@link PaymentGateway} instance.
+     *
+     * <p>Exposed for the controller's webhook verification logic;
+     * callers should prefer the dedicated callback handler for
+     * normal payment processing.
+     *
+     * @return the configured payment gateway
      */
     public PaymentGateway getPaymentGateway() {
         return paymentGateway;
     }
 
-    // ─────────────────────────────────────────────
-    // GET PAYMENTS — buyer history (paginated)
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Results are sorted by {@code createdAt} descending so the
+     * most recent payments appear first.
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public PageResponse<PaymentResponse> getPaymentsByBuyer(String buyerUuid, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<Payment> paymentPage = paymentRepository.findByBuyerUuid(buyerUuid, pageable);
@@ -377,18 +223,15 @@ public class PaymentServiceImpl implements PaymentService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────
-    // GET PAYMENT BY UUID
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * @throws PaymentNotFoundException if no payment matches the UUID
+     * @throws PaymentAccessException   if the buyer tries to access
+     *                                  another buyer's payment
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public PaymentResponse getPaymentByUuid(String uuid, String role, String buyerUuid) {
         Payment payment = paymentRepository.findByUuid(uuid)
                 .orElseThrow(() -> new PaymentNotFoundException("Payment not found: " + uuid));
@@ -397,18 +240,16 @@ public class PaymentServiceImpl implements PaymentService {
         return mapToResponse(payment);
     }
 
-    // ─────────────────────────────────────────────
-    // GET PAYMENT BY ORDER UUID
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * @throws PaymentNotFoundException if no payment exists for the
+     *                                  given order UUID
+     * @throws PaymentAccessException   if the buyer tries to access
+     *                                  another buyer's payment
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public PaymentResponse getPaymentByOrderUuid(String orderUuid, String role, String buyerUuid) {
         Payment payment = paymentRepository.findByOrderUuid(orderUuid)
                 .orElseThrow(() -> new PaymentNotFoundException("No payment found for order: " + orderUuid));
@@ -417,18 +258,15 @@ public class PaymentServiceImpl implements PaymentService {
         return mapToResponse(payment);
     }
 
-    // ─────────────────────────────────────────────
-    // SELLER: paginated payment splits
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Uses a custom JPQL sub-select in
+     * {@link PaymentRepository#findBySellerUuid} to locate payments
+     * that contain at least one split for the specified seller.
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public PageResponse<PaymentResponse> getSellerPayments(String sellerUuid, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<Payment> paymentPage = paymentRepository.findBySellerUuid(sellerUuid, pageable);
@@ -448,18 +286,14 @@ public class PaymentServiceImpl implements PaymentService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────
-    // SELLER DASHBOARD
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Aggregates completed payouts, pending payouts, and order
+     * count from the {@link PaymentSplitRepository}.
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public SellerDashboardResponse getSellerDashboard(String sellerUuid) {
         Double completed = paymentSplitRepository.sumSellerPayout(sellerUuid);
         Double pending = paymentSplitRepository.sumSellerPendingPayout(sellerUuid);
@@ -474,18 +308,16 @@ public class PaymentServiceImpl implements PaymentService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────
-    // ADMIN DASHBOARD
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Aggregates platform-wide metrics from the
+     * {@link PaymentSplitRepository}: gross revenue, platform fees,
+     * delivery fees, seller payouts, completed order count, and
+     * active seller count.
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public AdminDashboardResponse getAdminDashboard() {
         return AdminDashboardResponse.builder()
                 .totalGrossRevenue(paymentSplitRepository.sumTotalItemAmount())
@@ -497,11 +329,17 @@ public class PaymentServiceImpl implements PaymentService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────
-
-    /** Buyers may only access their own payments; admins can see all. */
+    /**
+     * Verifies that the caller is authorised to read the specified
+     * payment.  Buyers may only view their own payments; admins and
+     * sellers bypass this check.
+     *
+     * @param payment   the payment entity
+     * @param role      the caller's role
+     * @param buyerUuid the caller's UUID
+     * @throws PaymentAccessException if a buyer attempts to view
+     *                                another buyer's payment
+     */
     private void enforceReadAccess(Payment payment, String role, String buyerUuid) {
         if ("BUYER".equalsIgnoreCase(role) && !payment.getBuyerUuid().equals(buyerUuid)) {
             throw new PaymentAccessException("You can only view your own payments");
@@ -509,17 +347,11 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     /**
-     * MAPTORESPONSE - Method Documentation
+     * Maps a {@link Payment} entity and its associated
+     * {@link PaymentSplit} records to a {@link PaymentResponse} DTO.
      *
-     * PURPOSE:
-     * This method handles the mapToResponse operation.
-     *
-     * PARAMETERS:
-     * @param payment - Payment value
-     *
-     * RETURN VALUE:
-     * @return PaymentResponse - Result of the operation
-     *
+     * @param payment the payment entity to convert
+     * @return fully populated payment response
      */
     private PaymentResponse mapToResponse(Payment payment) {
         List<PaymentSplitResponse> splits = paymentSplitRepository.findByPaymentUuid(payment.getUuid())
@@ -539,17 +371,11 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     /**
-     * MAPSPLITTORESPONSE - Method Documentation
+     * Maps a single {@link PaymentSplit} entity to a
+     * {@link PaymentSplitResponse} DTO.
      *
-     * PURPOSE:
-     * This method handles the mapSplitToResponse operation.
-     *
-     * PARAMETERS:
-     * @param split - PaymentSplit value
-     *
-     * RETURN VALUE:
-     * @return PaymentSplitResponse - Result of the operation
-     *
+     * @param split the split entity to convert
+     * @return split response DTO
      */
     private PaymentSplitResponse mapSplitToResponse(PaymentSplit split) {
         return PaymentSplitResponse.builder()

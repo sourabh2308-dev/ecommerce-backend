@@ -1,2 +1,18 @@
--- product-service: unified schema for JPA auto-creation
--- This file is for documentation only; JPA will create the schema.
+-- ============================================================================
+-- PRODUCT SERVICE - Database Schema
+-- ============================================================================
+-- Target database : product_db (PostgreSQL 15+)
+-- ORM             : Hibernate / JPA with ddl-auto=validate
+--
+-- This file is provided for documentation purposes. JPA entity mappings are
+-- the source of truth; Hibernate validates the schema on startup rather than
+-- auto-creating or auto-updating tables.
+--
+-- Tables managed by JPA entities:
+--   products          - core product catalog with status, stock, pricing
+--   categories         - hierarchical product taxonomy (self-referencing FK)
+--   product_images     - multiple images per product with display ordering
+--   product_variants   - size/colour/etc. variants with independent stock & SKU
+--   flash_deals        - time-limited discount offers linked to products
+--   stock_movements    - audit log of every inventory change
+-- ============================================================================

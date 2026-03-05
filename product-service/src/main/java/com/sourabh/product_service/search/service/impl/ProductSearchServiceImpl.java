@@ -17,14 +17,35 @@ import java.util.Locale;
 import java.util.stream.StreamSupport;
 import java.util.stream.Collectors;
 
+/**
+ * Default implementation of {@link ProductSearchService}.
+ * <p>
+ * Bridges the PostgreSQL product store and the Elasticsearch search index.
+ * Indexing methods read from the JPA repository and write to the
+ * {@link ProductSearchRepository}. Search and autocomplete methods query
+ * Elasticsearch, apply in-memory filters (category, price range), and
+ * convert results to {@link ProductResponse} DTOs.
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ProductSearchServiceImpl implements ProductSearchService {
 
+    /** JPA repository for reading product data from PostgreSQL. */
     private final ProductRepository productRepository;
+
+    /** Elasticsearch repository for indexing and querying product documents. */
     private final ProductSearchRepository productSearchRepository;
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Loads all non-deleted products from PostgreSQL, converts them to
+     * {@link ProductDocument} instances, and bulk-saves them into the
+     * Elasticsearch index.
+     * </p>
+     */
     @Override
     @Transactional(readOnly = true)
     public void indexAllProducts() {
@@ -38,6 +59,13 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         log.info("Indexed {} products into Elasticsearch", docs.size());
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * If the product exists and is not deleted, it is indexed; otherwise
+     * any stale document with that UUID is removed from the index.
+     * </p>
+     */
     @Override
     @Transactional(readOnly = true)
     public void indexProductByUuid(String productUuid) {
@@ -51,12 +79,22 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 });
     }
 
+    /** {@inheritDoc} */
     @Override
     public void removeProductFromIndex(String productUuid) {
         productSearchRepository.deleteById(productUuid);
         log.info("Removed product {} from Elasticsearch index", productUuid);
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Performs an in-memory scan of all indexed documents, applying text
+     * matching, category filtering, and price-range constraints. Results
+     * are sorted by average rating (descending) then price (ascending)
+     * and limited to the requested page size (max 100).
+     * </p>
+     */
     @Override
     @Transactional(readOnly = true)
     public List<ProductResponse> search(String query, String category, Double minPrice, Double maxPrice, Integer size) {
@@ -79,6 +117,14 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         return all.stream().map(this::toResponse).collect(Collectors.toList());
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * Scans all indexed product names and returns those that start with
+     * the given prefix (case-insensitive). Results are sorted alphabetically
+     * and limited to the requested count (max 50).
+     * </p>
+     */
     @Override
     @Transactional(readOnly = true)
     public List<String> autocomplete(String prefix, Integer size) {
@@ -99,6 +145,13 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 .toList();
     }
 
+    /**
+     * Converts a JPA {@link Product} entity to an Elasticsearch
+     * {@link ProductDocument} for indexing.
+     *
+     * @param product the product entity to convert
+     * @return the corresponding Elasticsearch document
+     */
     private ProductDocument toDocument(Product product) {
         return ProductDocument.builder()
                 .uuid(product.getUuid())
@@ -115,6 +168,13 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 .build();
     }
 
+    /**
+     * Converts an Elasticsearch {@link ProductDocument} to a
+     * {@link ProductResponse} DTO for API consumers.
+     *
+     * @param doc the Elasticsearch document to convert
+     * @return the corresponding response DTO
+     */
     private ProductResponse toResponse(ProductDocument doc) {
         return ProductResponse.builder()
                 .uuid(doc.getUuid())
@@ -130,10 +190,24 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 .build();
     }
 
+    /**
+     * Checks whether the source string contains the value (case-insensitive).
+     *
+     * @param source the string to search within
+     * @param value  the substring to look for
+     * @return {@code true} if source contains value, ignoring case
+     */
     private boolean containsIgnoreCase(String source, String value) {
         return source != null && source.toLowerCase(Locale.ROOT).contains(value);
     }
 
+    /**
+     * Null-safe, case-insensitive string equality check.
+     *
+     * @param left  first string
+     * @param right second string
+     * @return {@code true} if both are non-null and equal ignoring case
+     */
     private boolean equalsIgnoreCase(String left, String right) {
         return left != null && right != null && left.equalsIgnoreCase(right);
     }

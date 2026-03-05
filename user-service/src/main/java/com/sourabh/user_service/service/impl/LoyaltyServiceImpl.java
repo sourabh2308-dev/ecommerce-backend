@@ -14,17 +14,39 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 1 point = ₹0.25 */
+/**
+ * Implementation of {@link LoyaltyService} for the loyalty-points programme.
+ *
+ * <p>Point-to-currency conversion rate: <strong>1 point = ₹{@value #POINT_VALUE}</strong>.
+ * Points are earned post-delivery and may be redeemed at checkout for a
+ * monetary discount.  Every transaction (earn or redeem) is persisted as
+ * a {@link LoyaltyPoint} row with a {@code balanceAfter} snapshot to enable
+ * an auditable transaction history.</p>
+ *
+ * <p>The class-level {@code @Transactional} ensures that balance reads and
+ * writes are consistent within a single database transaction.</p>
+ *
+ * @see LoyaltyService
+ * @see LoyaltyPointRepository
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional
 @Slf4j
 public class LoyaltyServiceImpl implements LoyaltyService {
 
+    /** Repository for loyalty-point transaction persistence. */
     private final LoyaltyPointRepository loyaltyPointRepository;
 
-    private static final double POINT_VALUE = 0.25; // ₹0.25 per point
+    /** Monetary value per loyalty point in Indian Rupees (₹). */
+    private static final double POINT_VALUE = 0.25;
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Computes the new balance by adding <em>points</em> to the current balance
+     * and records the transaction with the supplied metadata.</p>
+     */
     @Override
     public void earnPoints(String userUuid, int points, PointsTransactionType type,
                            String referenceId, String description) {
@@ -43,6 +65,12 @@ public class LoyaltyServiceImpl implements LoyaltyService {
         log.info("Points earned: userUuid={}, points={}, balance={}", userUuid, points, newBalance);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Validates that the user has enough points, deducts them, records a
+     * {@code REDEEMED} transaction, and returns the corresponding discount in ₹.</p>
+     */
     @Override
     public double redeemPoints(String userUuid, int pointsToRedeem, String orderUuid) {
         int currentBalance = loyaltyPointRepository.getBalance(userUuid);
@@ -64,6 +92,7 @@ public class LoyaltyServiceImpl implements LoyaltyService {
         return discount;
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public LoyaltyBalanceResponse getBalance(String userUuid) {
@@ -75,6 +104,7 @@ public class LoyaltyServiceImpl implements LoyaltyService {
                 .build();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<LoyaltyPointResponse> getHistory(String userUuid, int page, int size) {
@@ -90,6 +120,12 @@ public class LoyaltyServiceImpl implements LoyaltyService {
                 .build();
     }
 
+    /**
+     * Maps a {@link LoyaltyPoint} entity to a {@link LoyaltyPointResponse} DTO.
+     *
+     * @param lp the loyalty-point transaction entity
+     * @return the corresponding response DTO
+     */
     private LoyaltyPointResponse mapToResponse(LoyaltyPoint lp) {
         return LoyaltyPointResponse.builder()
                 .type(lp.getType())

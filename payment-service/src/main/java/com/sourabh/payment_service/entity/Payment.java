@@ -5,6 +5,21 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
+/**
+ * JPA entity representing a payment transaction in the platform.
+ *
+ * <p>A {@code Payment} is created when a buyer initiates a payment (REST) or
+ * when the Kafka consumer processes an {@code order.created} event (saga).
+ * Its lifecycle progresses through the statuses defined in
+ * {@link PaymentStatus}: {@code INITIATED -> PENDING -> SUCCESS / FAILED}.
+ *
+ * <p>When the external payment gateway (e.g. Razorpay) returns an
+ * asynchronous result, the {@link #gatewayOrderId} is used to correlate the
+ * webhook callback with the correct internal payment record.
+ *
+ * @see PaymentStatus
+ * @see PaymentSplit
+ */
 @Entity
 @Getter
 @Setter
@@ -13,72 +28,35 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class Payment {
 
+    /** Auto-generated primary key. */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
-    /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
-     */
-
-
+    /** Universally unique identifier exposed to external clients. */
     @Column(unique = true)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String uuid;
 
+    /** UUID of the order this payment settles. */
     private String orderUuid;
 
+    /** UUID of the buyer who initiated the payment. */
     private String buyerUuid;
 
+    /** Total payment amount in the platform currency (INR). */
     private Double amount;
 
+    /**
+     * Order ID returned by the external payment gateway (e.g. Razorpay
+     * {@code order_xxx}).  Used to correlate webhook callbacks with the
+     * internal payment; {@code null} when the mock gateway is active.
+     */
+    private String gatewayOrderId;
+
+    /** Current payment status (persisted as its enum name string). */
     @Enumerated(EnumType.STRING)
-    // @Enumerated applied to field below
-    // @Enumerated applied to field below
     private PaymentStatus status;
 
+    /** Timestamp when this payment record was created. */
     private LocalDateTime createdAt;
 }

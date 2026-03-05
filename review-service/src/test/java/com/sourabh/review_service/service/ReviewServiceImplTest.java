@@ -36,6 +36,23 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * Unit tests for {@link ReviewServiceImpl}.
+ *
+ * <p>All external dependencies (repositories, Feign client, Kafka template)
+ * are mocked via Mockito so that tests execute in isolation and focus purely
+ * on the business logic implemented by the service layer.
+ *
+ * <h3>Coverage areas</h3>
+ * <ul>
+ *   <li>Review creation — success path and failure scenarios (wrong buyer,
+ *       undelivered order, product not in order, duplicate review).</li>
+ *   <li>Review retrieval — by product (paginated), by UUID, by buyer.</li>
+ *   <li>Review update — success and authorisation failure.</li>
+ *   <li>Review deletion — by buyer, by admin, wrong buyer, not found.</li>
+ *   <li>Edge cases — minimum/maximum rating, empty result sets.</li>
+ * </ul>
+ */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ReviewServiceImpl Unit Tests")
 class ReviewServiceImplTest {
@@ -48,12 +65,18 @@ class ReviewServiceImplTest {
     @InjectMocks
     private ReviewServiceImpl reviewService;
 
+    /** Pre-built delivered order stub reused across create-review tests. */
     private OrderDto deliveredOrder;
+
+    /** Pre-built create-review request stub. */
     private CreateReviewRequest createRequest;
 
+    /**
+     * Initialises common test fixtures: a delivered order with one product
+     * item and a matching create-review request.
+     */
     @BeforeEach
     void setUp() {
-        // Setup default mocks for reviewVoteRepository (lenient for tests that don't use them)
         lenient().when(reviewVoteRepository.countHelpfulByReviewId(any())).thenReturn(0L);
         lenient().when(reviewVoteRepository.countNotHelpfulByReviewId(any())).thenReturn(0L);
 
@@ -74,10 +97,7 @@ class ReviewServiceImplTest {
         createRequest.setComment("Great product!");
     }
 
-    // ─────────────────────────────────────────────────
-    // createReview
-    // ─────────────────────────────────────────────────
-
+    /** Verifies the happy-path: valid buyer, delivered order, new review. */
     @Test
     @DisplayName("createReview: success — valid buyer, delivered order, new review")
     void createReview_success() {
@@ -142,10 +162,7 @@ class ReviewServiceImplTest {
         verify(kafkaTemplate, never()).send(any(), any());
     }
 
-    // ─────────────────────────────────────────────────
-    // getReviewsByProduct
-    // ─────────────────────────────────────────────────
-
+    /** Verifies paginated retrieval of reviews for a product. */
     @Test
     @DisplayName("getReviewsByProduct: returns paginated reviews")
     void getReviewsByProduct_returnsPaginatedResults() {
@@ -159,10 +176,7 @@ class ReviewServiceImplTest {
         assertThat(response.getTotalElements()).isEqualTo(1);
     }
 
-    // ─────────────────────────────────────────────────
-    // getReviewByUuid
-    // ─────────────────────────────────────────────────
-
+    /** Verifies single-review lookup by UUID. */
     @Test
     @DisplayName("getReviewByUuid: success")
     void getReviewByUuid_success() {
@@ -183,10 +197,7 @@ class ReviewServiceImplTest {
                 .isInstanceOf(ReviewNotFoundException.class);
     }
 
-    // ─────────────────────────────────────────────────
-    // updateReview
-    // ─────────────────────────────────────────────────
-
+    /** Verifies that the review author can update the comment. */
     @Test
     @DisplayName("updateReview: success — buyer can update own review comment")
     void updateReview_success() {
@@ -215,10 +226,7 @@ class ReviewServiceImplTest {
                 .isInstanceOf(ReviewAccessException.class);
     }
 
-    // ─────────────────────────────────────────────────
-    // deleteReview
-    // ─────────────────────────────────────────────────
-
+    /** Verifies that a buyer can soft-delete their own review. */
     @Test
     @DisplayName("deleteReview: buyer can delete own review")
     void deleteReview_byBuyer_success() {
@@ -257,10 +265,7 @@ class ReviewServiceImplTest {
                 .isInstanceOf(ReviewAccessException.class);
     }
 
-    // ─────────────────────────────────────────────────
-    // getMyReviews
-    // ─────────────────────────────────────────────────
-
+    /** Verifies paginated retrieval of a buyer's own reviews. */
     @Test
     @DisplayName("getMyReviews: returns paginated reviews for the buyer")
     void getMyReviews_returnsResults() {
@@ -273,10 +278,6 @@ class ReviewServiceImplTest {
         assertThat(response.getContent()).hasSize(1);
         assertThat(response.getContent().get(0).getBuyerUuid()).isEqualTo("buyer-uuid");
     }
-
-    // ─────────────────────────────────────────────────
-    // Helper
-    // ─────────────────────────────────────────────────
 
     @Test
     @DisplayName("createReview: rating validation - minimum rating 1")
@@ -336,6 +337,15 @@ class ReviewServiceImplTest {
         assertThat(response.getContent()).isEmpty();
     }
 
+    /**
+     * Convenience factory for building {@link Review} entity stubs with
+     * sensible defaults for testing.
+     *
+     * @param uuid        review UUID
+     * @param productUuid product UUID
+     * @param buyerUuid   buyer UUID
+     * @return a pre-populated {@link Review} builder result
+     */
     private Review buildReview(String uuid, String productUuid, String buyerUuid) {
         return Review.builder()
                 .uuid(uuid)

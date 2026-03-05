@@ -6,50 +6,23 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Request DTO representing a single line item within a
+ * {@link CreateOrderRequest}.
+ *
+ * <p>Each item identifies the product to purchase and the desired
+ * quantity. Fields are validated using Bean Validation annotations.</p>
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class OrderItemRequest {
 
-    /**
-
-
-     * VALIDATION: This field is required and cannot be blank.
-
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-
-     */
-
-
+    /** UUID of the product to order (required, must not be blank). */
     @NotBlank(message = "Product UUID is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String productUuid;
 
+    /** Number of units to order (required, minimum 1). */
     @NotNull(message = "Quantity is required")
-    // Validation constraint
-    // @NotNull - Validates input before processing
     @Min(value = 1, message = "Quantity must be at least 1")
-    // Validation constraint
-    // @Min - Validates input before processing
-    // Validation constraint
-    // @Min - Validates input before processing
     private Integer quantity;
 }

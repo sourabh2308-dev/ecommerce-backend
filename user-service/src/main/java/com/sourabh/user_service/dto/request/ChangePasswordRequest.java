@@ -5,57 +5,27 @@ import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Request payload for changing an authenticated user's password.
+ *
+ * <p>The caller must supply the current password for verification, the
+ * desired new password, and a confirmation of the new password. All
+ * fields are mandatory and validated via Bean Validation annotations.</p>
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class ChangePasswordRequest {
 
-    /**
-
-
-     * VALIDATION: This field is required and cannot be blank.
-
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-
-     */
-
-
+    /** The user's current password, used for identity verification. */
     @NotBlank(message = "Current password is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String currentPassword;
 
+    /** The desired new password (minimum 8 characters). */
     @NotBlank(message = "New password is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     @Size(min = 8, message = "New password must be at least 8 characters")
-    // Validation constraint
-    // @Size - Validates input before processing
-    // Validation constraint
-    // @Size - Validates input before processing
     private String newPassword;
 
+    /** Must match {@link #newPassword} exactly; verified in the service layer. */
     @NotBlank(message = "Confirm password is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String confirmNewPassword;
 }

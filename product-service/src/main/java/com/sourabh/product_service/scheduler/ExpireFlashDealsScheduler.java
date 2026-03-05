@@ -13,25 +13,40 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Automatically deactivates expired flash deals.
- * Runs periodically to mark flash deals with endTime < now() as inactive.
+ * Scheduled task that automatically deactivates expired flash deals.
+ * <p>
+ * Runs at a configurable cron interval (default: every 5 minutes). On each
+ * execution it queries for flash deals whose {@code endTime} has passed but
+ * are still marked as active, then sets their {@code isActive} flag to
+ * {@code false}. The scheduler can be disabled entirely via the
+ * {@code scheduler.expire-flash-deals.enabled} application property.
+ * </p>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class ExpireFlashDealsScheduler {
 
+    /** Repository used to query and persist flash deal entities. */
     private final FlashDealRepository flashDealRepository;
 
+    /** Feature flag to enable or disable this scheduler at runtime. */
     @Value("${scheduler.expire-flash-deals.enabled:true}")
     private boolean enabled;
 
-    @Value("${scheduler.expire-flash-deals.cron:0 */5 * * * *}")  // Every 5 minutes
+    /** Cron expression controlling the scheduler's execution frequency. */
+    @Value("${scheduler.expire-flash-deals.cron:0 */5 * * * *}")
     private String cronExpression;
 
     /**
-     * Run at configured interval (default: every 5 minutes).
-     * Deactivate flash deals where endTime < now().
+     * Finds and deactivates all flash deals whose end time has elapsed.
+     * <p>
+     * Executed at the interval defined by the
+     * {@code scheduler.expire-flash-deals.cron} property. Each expired deal is
+     * individually saved so that a failure on one deal does not prevent the
+     * others from being processed. The entire method runs within a single
+     * transaction for consistency.
+     * </p>
      */
     @Scheduled(cron = "${scheduler.expire-flash-deals.cron:0 */5 * * * *}")
     @Transactional

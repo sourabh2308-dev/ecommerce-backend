@@ -37,56 +37,55 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * ORDER SERVICE IMPLEMENTATION - Core Order Processing Logic
+ * Core order-processing implementation handling the complete order lifecycle.
  *
- * Orchestrates complete order lifecycle: creation, validation, status transitions, and payment saga.
- * Uses Feign for sync product-service calls, Kafka for async payment events.
+ * <p>Manages order creation with product-stock validation, status transitions
+ * driven by role-based rules (buyer, seller, admin), and a payment saga with
+ * Kafka events and compensating stock-restore actions on failure.</p>
  *
- * SAGA PATTERN:
- * 1. createOrder: Validate + persist + publish order.created event
- * 2. payment-service: Consumes event, processes payment, publishes payment.completed
- * 3. updatePaymentStatus: Receives event, updates status + compensates if needed
+ * <h3>Saga Flow</h3>
+ * <ol>
+ *   <li>{@link #createOrder} — validate, persist, publish {@code order.created}</li>
+ *   <li>Payment-service consumes event, publishes {@code payment.completed}</li>
+ *   <li>{@link #updatePaymentStatus} — updates status; cancels + restores stock on failure</li>
+ * </ol>
  *
- * COMPENSATION:
- * If payment fails, cancels order and restores product stock via productServiceClient
+ * @see OrderService
+ * @see OrderSplitterService
  */
-// Service Implementation - Contains business logic and data operations
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OrderServiceImpl implements OrderService {
 
+    /** JPA repository for order persistence and queries. */
     private final OrderRepository orderRepository;
+    /** Feign client for product-service stock operations. */
     private final ProductServiceClient productServiceClient;
+    /** Kafka template for publishing order lifecycle events. */
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    /** Publisher for order-status-change notification events. */
     private final OrderNotificationPublisher notificationPublisher;
+    /** Splits multi-seller orders into per-seller sub-orders. */
     private final com.sourabh.order_service.service.OrderSplitterService orderSplitterService;
 
+    /** Kafka topic used for new-order events consumed by payment-service. */
     private static final String TOPIC_ORDER_CREATED = "order.created";
 
     /**
-     * Creates new order with items and shipping details, triggers payment saga.
+     * {@inheritDoc}
      *
-     * Steps:
-     * 1. Validate buyer role (only BUYER can create)
-     * 2. Fetch all products, validate ACTIVE status
-     * 3. Reduce stock for all products (with compensation on failure)
-     * 4. Persist Order with OrderItems to DB
-     * 5. Publish order.created Kafka event (triggers payment-service)
-     * 6. Return order response with paymentStatus = PENDING
+     * <p>Validates the buyer role, fetches and validates each product from
+     * product-service, reduces stock (with compensating restore on failure),
+     * persists the order, optionally splits it by seller, and publishes an
+     * {@code order.created} Kafka event to trigger the payment saga.</p>
      *
-     * Compensation: If stock reduction fails on item N, restores stock for items 0..N-1
-     *
-     * Exceptions: OrderAccessException (not BUYER), OrderStateException (product issues)
+     * @throws OrderAccessException if the caller is not a {@code BUYER}
+     * @throws OrderStateException  if items are empty, a product is inactive,
+     *                              or stock reduction fails
      */
     @Override
     @Transactional
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public OrderResponse createOrder(CreateOrderRequest request, String role, String buyerUuid) {
 
         if (request.getItems() == null || request.getItems().isEmpty()) {
@@ -97,7 +96,6 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderAccessException("Only buyers can place orders");
         }
 
-        // Fetch all products and validate
         List<ProductDto> products = new java.util.ArrayList<>();
         for (OrderItemRequest itemReq : request.getItems()) {
             ProductDto product = fetchProduct(itemReq.getProductUuid());
@@ -107,7 +105,6 @@ public class OrderServiceImpl implements OrderService {
             products.add(product);
         }
 
-        // Reduce stock for all products
         List<String> reducedProductUuids = new java.util.ArrayList<>();
         try {
             for (int i = 0; i < request.getItems().size(); i++) {
@@ -116,7 +113,7 @@ public class OrderServiceImpl implements OrderService {
                 reducedProductUuids.add(itemReq.getProductUuid());
             }
         } catch (FeignException e) {
-            // Compensate: restore stock for already-reduced products
+            // Compensate: restore stock for products already reduced
             for (int j = 0; j < reducedProductUuids.size(); j++) {
                 try {
                     productServiceClient.restoreStock(
@@ -130,7 +127,7 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderStateException("Failed to reduce product stock: " + e.getMessage());
         }
 
-        // Calculate total and build order items
+        // Build order entity and compute line-item totals
         double totalAmount = 0;
         List<OrderItem> orderItems = new java.util.ArrayList<>();
         List<OrderItemEvent> itemEvents = new java.util.ArrayList<>();
@@ -180,14 +177,14 @@ public class OrderServiceImpl implements OrderService {
 
         Order savedOrder = orderRepository.save(order);
 
-        // Check if order contains items from multiple sellers and split if needed
+        // Split into per-seller sub-orders when multiple sellers are present
         if (orderSplitterService.requiresSplitting(savedOrder)) {
             List<Order> subOrders = orderSplitterService.splitOrderBySeller(savedOrder);
             log.info("Order {} split into {} sub-orders for independent seller fulfillment", 
                     savedOrder.getUuid(), subOrders.size());
         }
 
-        // Publish event for payment-service
+        // Publish Kafka event to trigger payment-service saga
         OrderCreatedEvent event = new OrderCreatedEvent(
                 savedOrder.getUuid(),
                 savedOrder.getBuyerUuid(),
@@ -199,6 +196,7 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(savedOrder);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<OrderResponse> listOrders(int page, int size, String role, String buyerUuid) {
@@ -211,6 +209,7 @@ public class OrderServiceImpl implements OrderService {
         return toPageResponse(orderPage);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<OrderResponse> listSellerOrders(int page, int size, String sellerUuid) {
@@ -219,6 +218,13 @@ public class OrderServiceImpl implements OrderService {
         return toPageResponse(orderPage);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Buyers may only view their own orders; sellers may only view orders
+     * that contain at least one of their items. Admins have unrestricted
+     * access. Results are cached by order UUID.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     @Cacheable(value = "orders", key = "#uuid")
@@ -226,12 +232,10 @@ public class OrderServiceImpl implements OrderService {
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
 
-        // Authorization: buyers see only their orders
         if ("BUYER".equalsIgnoreCase(role) && !order.getBuyerUuid().equals(userUuid)) {
             throw new OrderAccessException("You can only view your own orders");
         }
 
-        // Sellers see orders containing their items
         if ("SELLER".equalsIgnoreCase(role)) {
             boolean hasItems = order.getItems() != null && order.getItems().stream()
                     .anyMatch(item -> userUuid.equals(item.getSellerUuid()));
@@ -243,15 +247,16 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Delegates to role-specific handlers: {@code cancelByBuyer},
+     * {@code advanceByAdmin}, or {@code advanceBySeller}. Evicts the
+     * order from the Redis cache on success.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "orders", key = "#uuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
         public OrderResponse updateOrderStatus(
             String uuid,
             String role,
@@ -279,15 +284,15 @@ public class OrderServiceImpl implements OrderService {
         return response;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>On {@code FAILED} payment status the order is automatically
+     * cancelled. Evicts the order from the Redis cache.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "orders", key = "#uuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public void updatePaymentStatus(String uuid, String status) {
         Order order = orderRepository.findByUuidAndIsDeletedFalse(uuid)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found: " + uuid));
@@ -303,22 +308,19 @@ public class OrderServiceImpl implements OrderService {
         log.info("Payment status updated: orderUuid={}, paymentStatus={}", uuid, status);
     }
 
-    // Private helper methods
-
     /**
-     * CANCELBYBUYER - Method Documentation
+     * Cancels an order on behalf of the buyer and restores product stock.
      *
-     * PURPOSE:
-     * This method handles the cancelByBuyer operation.
+     * <p>Only the order’s owner may cancel, and only while the order is in
+     * {@code CREATED} status. Stock for each item is restored via
+     * product-service as a saga compensation step.</p>
      *
-     * PARAMETERS:
-     * @param order - Order value
-     * @param buyerUuid - String value
-     * @param requestedStatus - OrderStatus value
-     *
-     * RETURN VALUE:
-     * @return OrderResponse - Result of the operation
-     *
+     * @param order          the order to cancel
+     * @param buyerUuid      authenticated buyer’s UUID
+     * @param requestedStatus must be {@code CANCELLED}
+     * @return the cancelled order response
+     * @throws OrderAccessException if the buyer does not own the order
+     * @throws OrderStateException  if the order is past the cancellable stage
      */
     private OrderResponse cancelByBuyer(Order order, String buyerUuid, OrderStatus requestedStatus) {
         if (!order.getBuyerUuid().equals(buyerUuid)) {
@@ -333,7 +335,7 @@ public class OrderServiceImpl implements OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         orderRepository.save(order);
 
-        // Saga compensation: restore stock for all items
+        // Saga compensation: restore stock for each item
         if (order.getItems() != null) {
             order.getItems().forEach(item -> {
                 try {
@@ -412,18 +414,17 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * ADVANCEBYADMIN - Method Documentation
+     * Advances order status on behalf of an admin.
      *
-     * PURPOSE:
-     * This method handles the advanceByAdmin operation.
+     * <p>Validates that the requested transition is allowed by the order’s
+     * state machine, persists the change, and publishes a status-change
+     * notification event. Sets payment status to {@code REFUNDED} when
+     * transitioning to {@code REFUND_ISSUED}.</p>
      *
-     * PARAMETERS:
-     * @param order - Order value
-     * @param requestedStatus - OrderStatus value
-     *
-     * RETURN VALUE:
-     * @return OrderResponse - Result of the operation
-     *
+     * @param order           the order to update
+     * @param requestedStatus the target status
+     * @return the updated order response
+     * @throws OrderStateException if the transition is not permitted
      */
     private OrderResponse advanceByAdmin(Order order, OrderStatus requestedStatus) {
         List<OrderStatus> allowed = allowedTransitionsFor(order);
@@ -446,22 +447,19 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * ADVANCEBYSELLER - Method Documentation
+     * Advances order status on behalf of a seller.
      *
-     * PURPOSE:
-     * This method handles the advanceBySeller operation.
+     * <p>Verifies the seller has items in the order before checking the
+     * allowed transition. Publishes a notification event on success.</p>
      *
-     * PARAMETERS:
-     * @param order - Order value
-     * @param sellerUuid - String value
-     * @param requestedStatus - OrderStatus value
-     *
-     * RETURN VALUE:
-     * @return OrderResponse - Result of the operation
-     *
+     * @param order           the order to update
+     * @param sellerUuid      the seller’s UUID
+     * @param requestedStatus the target status
+     * @return the updated order response
+     * @throws OrderAccessException if the seller has no items in the order
+     * @throws OrderStateException  if the transition is not permitted
      */
     private OrderResponse advanceBySeller(Order order, String sellerUuid, OrderStatus requestedStatus) {
-        // Verify this seller has items in the order
         boolean hasItems = order.getItems() != null && order.getItems().stream()
                 .anyMatch(item -> sellerUuid.equals(item.getSellerUuid()));
         if (!hasItems) {
@@ -488,6 +486,10 @@ public class OrderServiceImpl implements OrderService {
         return mapToResponse(order);
     }
 
+    /**
+     * Returns the list of allowed next statuses for the given order, based on
+     * its current status and return type.
+     */
     private List<OrderStatus> allowedTransitionsFor(Order order) {
         return switch (order.getStatus()) {
             case CREATED -> List.of(OrderStatus.CONFIRMED);
@@ -509,17 +511,11 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * FETCHPRODUCT - Method Documentation
+     * Fetches a product DTO from product-service via Feign.
      *
-     * PURPOSE:
-     * This method handles the fetchProduct operation.
-     *
-     * PARAMETERS:
-     * @param productUuid - String value
-     *
-     * RETURN VALUE:
-     * @return ProductDto - Result of the operation
-     *
+     * @param productUuid the product’s UUID
+     * @return the product DTO
+     * @throws OrderStateException if the product is not found
      */
     private ProductDto fetchProduct(String productUuid) {
         try {
@@ -530,17 +526,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * TOPAGERESPONSE - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the toPageResponse operation.
-     *
-     * PARAMETERS:
-     * @param orderPage - Page<Order> value
-     *
-     * RETURN VALUE:
-     * @return PageResponse<OrderResponse> - Result of the operation
-     *
+     * Converts a Spring Data {@link Page} of orders into a {@link PageResponse} DTO.
      */
     private PageResponse<OrderResponse> toPageResponse(Page<Order> orderPage) {
         List<OrderResponse> responses = orderPage.getContent()
@@ -558,19 +544,7 @@ public class OrderServiceImpl implements OrderService {
                 .build();
     }
 
-    /**
-     * MAPTORESPONSE - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the mapToResponse operation.
-     *
-     * PARAMETERS:
-     * @param order - Order value
-     *
-     * RETURN VALUE:
-     * @return OrderResponse - Result of the operation
-     *
-     */
+    /** Maps an {@link Order} entity (with its items) to an {@link OrderResponse} DTO. */
     private OrderResponse mapToResponse(Order order) {
         List<OrderItemResponse> itemResponses = order.getItems() == null
                 ? List.of()
@@ -609,14 +583,13 @@ public class OrderServiceImpl implements OrderService {
                 .build();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public List<OrderResponse> getSubOrders(String parentOrderUuid, String role, String userUuid) {
-        // First verify parent order exists and user has access
         Order parentOrder = orderRepository.findByUuidAndIsDeletedFalse(parentOrderUuid)
                 .orElseThrow(() -> new OrderNotFoundException("Parent order not found: " + parentOrderUuid));
 
-        // Verify access rights
         if ("BUYER".equalsIgnoreCase(role) && !parentOrder.getBuyerUuid().equals(userUuid)) {
             throw new OrderAccessException("Access denied to this order");
         }
@@ -627,6 +600,7 @@ public class OrderServiceImpl implements OrderService {
                 .toList();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public List<OrderResponse> getOrderGroup(String orderGroupId, String role, String userUuid) {
@@ -636,7 +610,6 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderNotFoundException("No orders found for group: " + orderGroupId);
         }
 
-        // Verify access rights (check any order in the group)
         Order sampleOrder = groupOrders.get(0);
         if ("BUYER".equalsIgnoreCase(role) && !sampleOrder.getBuyerUuid().equals(userUuid)) {
             throw new OrderAccessException("Access denied to this order group");

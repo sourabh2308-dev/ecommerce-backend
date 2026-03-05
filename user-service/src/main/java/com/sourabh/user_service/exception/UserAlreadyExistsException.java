@@ -1,30 +1,22 @@
 package com.sourabh.user_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Thrown when an attempt is made to register a user with an email address
+ * that is already associated with an existing account.
+ *
+ * <p>Handled by
+ * {@link GlobalExceptionHandler#handleUserExists(UserAlreadyExistsException)},
+ * which returns HTTP 409 (Conflict) with error code
+ * {@code USER_ALREADY_EXISTS}.</p>
  */
 public class UserAlreadyExistsException extends RuntimeException {
 
+    /**
+     * Constructs a new {@code UserAlreadyExistsException} with the specified
+     * detail message.
+     *
+     * @param message a description indicating which identifier already exists
+     */
     public UserAlreadyExistsException(String message) {
         super(message);
     }

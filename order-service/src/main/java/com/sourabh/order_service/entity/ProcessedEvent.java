@@ -9,8 +9,22 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * Tracks processed Kafka event IDs to provide idempotent event consumption.
- * Before processing any event, check if its eventId is already recorded here.
+ * JPA entity that records already-processed Kafka event identifiers to guarantee
+ * idempotent event consumption across the order-service.
+ *
+ * <p>Before processing any incoming Kafka event, consumers check whether its
+ * unique {@link #eventId} already exists in this table. If it does, the event
+ * is treated as a duplicate and silently skipped, preventing side-effects such
+ * as double stock adjustments or duplicate status updates.</p>
+ *
+ * <p>Mapped to the {@code processed_events} table with a unique index on
+ * the {@code event_id} column for fast look-ups.</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ * @see com.sourabh.order_service.kafka.consumer.PaymentEventConsumer
+ * @see com.sourabh.order_service.repository.ProcessedEventRepository
  */
 @Entity
 @Table(name = "processed_events", indexes = {
@@ -22,73 +36,32 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class ProcessedEvent {
 
+    /**
+     * Database-generated primary key.
+     */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
     /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
+     * Unique identifier of the processed event, used as the idempotency /
+     * deduplication key (e.g. {@code "payment-completed:<paymentUuid>"}).
+     * Maximum length is 64 characters.
      */
-
-
     @Column(name = "event_id", nullable = false, unique = true, length = 64)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String eventId;
 
+    /**
+     * Name of the Kafka topic from which the event was consumed
+     * (e.g. {@code "payment.completed"}). Maximum length is 128 characters.
+     */
     @Column(name = "topic", nullable = false, length = 128)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String topic;
 
+    /**
+     * Timestamp recording when the event was processed and this record
+     * was persisted.
+     */
     @Column(name = "processed_at", nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private LocalDateTime processedAt;
 }

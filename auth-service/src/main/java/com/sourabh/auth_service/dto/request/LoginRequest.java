@@ -5,43 +5,25 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Request DTO for the login endpoint.
+ *
+ * <p>Captures the user's email and password submitted during authentication.
+ * Both fields are validated with {@code @NotBlank}; the email is additionally
+ * validated with {@code @Email}.  Validation failures result in a 400 Bad
+ * Request handled by
+ * {@link com.sourabh.auth_service.exception.GlobalExceptionHandler}.</p>
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class LoginRequest {
 
+    /** User's email address (authentication principal). */
     @Email
-    /**
-
-     * VALIDATION: This field is required and cannot be blank.
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-     */
-
     @NotBlank
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String email;
 
+    /** User's plain-text password (compared against BCrypt hash in user-service). */
     @NotBlank
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String password;
 }

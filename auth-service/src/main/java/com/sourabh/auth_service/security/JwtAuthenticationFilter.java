@@ -17,133 +17,40 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.Collections;
 
+/**
+ * Servlet filter that extracts and validates a JWT bearer token from the
+ * {@code Authorization} header and populates the Spring Security context.
+ *
+ * <p>If the request contains a valid {@code Bearer <token>} header, the
+ * filter parses the JWT via {@link JwtUtil}, extracts the user's email and
+ * role, and sets a {@link UsernamePasswordAuthenticationToken} in the
+ * {@link SecurityContextHolder}.  This enables {@code @PreAuthorize}
+ * annotations on downstream controllers to perform role-based checks.</p>
+ *
+ * <p>Requests without a bearer token pass through unauthenticated,
+ * allowing public endpoints to function normally.  Invalid tokens are
+ * logged and silently ignored.</p>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-// HTTP Filter - Intercepts requests for cross-cutting concerns
-/**
- * HTTP FILTER - Request/Response Interceptor
- * 
- * Intercepts every HTTP request/response for cross-cutting concerns:
- *   - JWT validation
- *   - Header injection
- *   - Request/response logging
- *   - Rate limiting
- * 
- * Executes before controller and after response generation.
- */
-/**
- * HTTP REQUEST/RESPONSE FILTER - Interceptor for Cross-Cutting Concerns
- * 
- * PURPOSE:
- * Intercepts every HTTP request and response passing through this service.
- * Implements cross-cutting concerns like authentication, logging, header
- * injection, request validation before reaching controller methods.
- * 
- * FILTER CHAIN:
- * Request → Filter1 → Filter2 → ... → Controller → ... → Filter2 → Filter1 → Response
- * 
- * EXECUTION ORDER:
- * Controlled by @Order annotation (lower number = higher priority)
- * Common order:
- *   1. @Order(1): CORS filter
- *   2. @Order(2): Authentication filter (JWT validation)
- *   3. @Order(3): Authorization filter (role checks)
- *   4. @Order(4): Logging filter
- *   5. @Order(5): Rate limiting filter
- * 
- * FILTER TYPES:
- * 
- * 1. JwtAuthenticationFilter:
- *    - Validates JWT token from Authorization header
- *    - Extracts user claims (uuid, role, email)
- *    - Sets Spring Security context for @PreAuthorize to work
- * 
- * 2. HeaderInjectionFilter:
- *    - Injects custom headers (X-User-UUID, X-User-Role)
- *    - Used by downstream services/controllers
- * 
- * 3. InternalSecretFilter:
- *    - Validates internal service-to-service calls
- *    - Checks X-Internal-Secret header matches configured secret
- * 
- * 4. LoggingFilter:
- *    - Logs request method, path, headers, body
- *    - Logs response status, body, duration
- * 
- * IMPLEMENTATION PATTERN:
- * class MyFilter implements Filter {
- *   @Override
- *   public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) {
- *     // Pre-processing (before controller)
- *     HttpServletRequest request = (HttpServletRequest) req;
- *     
- *     // Pass to next filter/controller
- *     chain.doFilter(request, response);
- *     
- *     // Post-processing (after controller)
- *     HttpServletResponse response = (HttpServletResponse) res;
- *   }
- * }
- */
-/**
- * HTTP REQUEST/RESPONSE FILTER - Interceptor for Cross-Cutting Concerns
- * 
- * PURPOSE:
- * Intercepts every HTTP request and response passing through this service.
- * Implements cross-cutting concerns like authentication, logging, header
- * injection, request validation before reaching controller methods.
- * 
- * FILTER CHAIN:
- * Request → Filter1 → Filter2 → ... → Controller → ... → Filter2 → Filter1 → Response
- * 
- * EXECUTION ORDER:
- * Controlled by @Order annotation (lower number = higher priority)
- * Common order:
- *   1. @Order(1): CORS filter
- *   2. @Order(2): Authentication filter (JWT validation)
- *   3. @Order(3): Authorization filter (role checks)
- *   4. @Order(4): Logging filter
- *   5. @Order(5): Rate limiting filter
- * 
- * FILTER TYPES:
- * 
- * 1. JwtAuthenticationFilter:
- *    - Validates JWT token from Authorization header
- *    - Extracts user claims (uuid, role, email)
- *    - Sets Spring Security context for @PreAuthorize to work
- * 
- * 2. HeaderInjectionFilter:
- *    - Injects custom headers (X-User-UUID, X-User-Role)
- *    - Used by downstream services/controllers
- * 
- * 3. InternalSecretFilter:
- *    - Validates internal service-to-service calls
- *    - Checks X-Internal-Secret header matches configured secret
- * 
- * 4. LoggingFilter:
- *    - Logs request method, path, headers, body
- *    - Logs response status, body, duration
- * 
- * IMPLEMENTATION PATTERN:
- * class MyFilter implements Filter {
- *   @Override
- *   public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) {
- *     // Pre-processing (before controller)
- *     HttpServletRequest request = (HttpServletRequest) req;
- *     
- *     // Pass to next filter/controller
- *     chain.doFilter(request, response);
- *     
- *     // Post-processing (after controller)
- *     HttpServletResponse response = (HttpServletResponse) res;
- *   }
- * }
- */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /** Utility for JWT parsing, validation, and claims extraction. */
     private final JwtUtil jwtUtil;
 
+    /**
+     * Inspects the {@code Authorization} header for a bearer token.  If
+     * present and valid the user's email and role are placed into the
+     * Spring Security context; otherwise the request continues
+     * unauthenticated.
+     *
+     * @param request      the incoming HTTP request
+     * @param response     the HTTP response
+     * @param filterChain  the remaining filter chain
+     * @throws ServletException if a servlet error occurs
+     * @throws IOException      if an I/O error occurs
+     */
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,

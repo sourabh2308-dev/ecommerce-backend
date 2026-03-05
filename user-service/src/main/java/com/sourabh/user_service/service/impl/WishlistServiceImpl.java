@@ -16,14 +16,29 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Implementation of {@link WishlistService} for user wishlist management.
+ *
+ * <p>Wishlist items are stored in the {@code wishlist_items} table with a
+ * composite uniqueness constraint on {@code (user_id, product_uuid)} to
+ * prevent duplicate entries. Each add/remove operation returns the full
+ * updated wishlist for immediate UI rendering.</p>
+ *
+ * @see WishlistService
+ * @see WishlistItemRepository
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class WishlistServiceImpl implements WishlistService {
 
+    /** Repository for {@link WishlistItem} persistence operations. */
     private final WishlistItemRepository wishlistItemRepository;
+
+    /** Repository for {@link User} lookups. */
     private final UserRepository userRepository;
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public List<WishlistItemResponse> getWishlist(String userUuid) {
@@ -34,6 +49,7 @@ public class WishlistServiceImpl implements WishlistService {
                 .toList();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public List<WishlistItemResponse> addToWishlist(String userUuid, WishlistRequest request) {
@@ -56,6 +72,7 @@ public class WishlistServiceImpl implements WishlistService {
         return getWishlist(userUuid);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public List<WishlistItemResponse> removeFromWishlist(String userUuid, String productUuid) {
@@ -65,6 +82,7 @@ public class WishlistServiceImpl implements WishlistService {
         return getWishlist(userUuid);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public boolean isInWishlist(String userUuid, String productUuid) {
@@ -72,11 +90,23 @@ public class WishlistServiceImpl implements WishlistService {
         return wishlistItemRepository.existsByUserAndProductUuid(user, productUuid);
     }
 
+    /**
+     * Looks up a {@link User} by UUID or throws {@link UserNotFoundException}.
+     *
+     * @param userUuid the UUID to search for
+     * @return the matching {@link User} entity
+     */
     private User findUser(String userUuid) {
         return userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
     }
 
+    /**
+     * Maps a {@link WishlistItem} entity to a {@link WishlistItemResponse} DTO.
+     *
+     * @param item the wishlist item entity
+     * @return the corresponding response DTO
+     */
     private WishlistItemResponse mapToResponse(WishlistItem item) {
         return WishlistItemResponse.builder()
                 .id(item.getId())

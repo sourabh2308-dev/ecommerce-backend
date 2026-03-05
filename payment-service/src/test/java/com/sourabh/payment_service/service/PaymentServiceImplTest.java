@@ -24,6 +24,26 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * Unit tests for {@link PaymentServiceImpl}.
+ *
+ * <p>Uses Mockito to isolate the service layer from the database
+ * ({@link PaymentRepository}) and messaging infrastructure
+ * ({@link KafkaTemplate}). The external {@code PaymentGateway} is also
+ * mocked so that tests remain deterministic regardless of payment
+ * provider configuration.
+ *
+ * <h3>Test coverage highlights</h3>
+ * <ul>
+ *   <li>Role-based access control (only BUYER may initiate)</li>
+ *   <li>Buyer UUID stamping from the gateway header</li>
+ *   <li>Kafka event publication after successful payment</li>
+ *   <li>Gateway "pending" flow for external providers like Razorpay</li>
+ *   <li>Webhook callback status update and Kafka event</li>
+ * </ul>
+ *
+ * @see PaymentServiceImpl
+ */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("PaymentServiceImpl Unit Tests")
 class PaymentServiceImplTest {
@@ -156,7 +176,10 @@ class PaymentServiceImplTest {
         verify(paymentRepository, atLeastOnce()).save(captor.capture());
         Payment saved = captor.getAllValues().get(captor.getAllValues().size() - 1);
         assertThat(saved.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(saved.getGatewayOrderId()).isEqualTo("razorpay_order_12345");
 
+        // PENDING payments should NOT publish Kafka event yet (wait for callback)
+        verify(kafkaTemplate, never()).send(anyString(), any());
         verify(paymentGateway).initiate(eq(250.00), eq("INR"), anyString());
     }
 
@@ -168,6 +191,7 @@ class PaymentServiceImplTest {
                 .orderUuid("order-123")
                 .status(PaymentStatus.PENDING)
                 .build();
+        when(paymentRepository.findByGatewayOrderId("order-123")).thenReturn(java.util.Optional.empty());
         when(paymentRepository.findByOrderUuid("order-123")).thenReturn(java.util.Optional.of(existing));
         when(paymentRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 

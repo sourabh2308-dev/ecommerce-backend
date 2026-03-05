@@ -5,51 +5,47 @@ import lombok.Getter;
 
 import java.util.List;
 
-@Getter
-@Builder
 /**
- * DATA TRANSFER OBJECT (DTO) - Server Response Format
- * 
- * Defines the JSON structure returned to HTTP clients.
- * Built from Entity objects via mapper methods.
- * May include computed fields not in database.
- */
-/**
- * PAGE RESPONSE DTO - Paginated Results Container
- * 
- * PURPOSE:
- * Wraps paginated list results with metadata about pagination.
- * Used by all list endpoints that support pagination.
- * 
- * FIELDS:
- * - content: List of items (orders, products, users, etc.)
- * - page: Current page number (0-indexed)
- * - size: Items per page
- * - totalElements: Total count across all pages
- * - totalPages: Total number of pages
- * - last: Boolean indicating if this is the last page
- * 
- * EXAMPLE JSON:
+ * Generic paginated response wrapper used by list endpoints that support
+ * pagination within the order-service.
+ *
+ * <p>Encapsulates a page of results together with metadata about the
+ * current page position, total element count, and whether additional pages
+ * exist. Clients use this information to render pagination controls.</p>
+ *
+ * <p><b>Example JSON:</b></p>
+ * <pre>
  * {
- *   "content": [{...}, {...}, {...}],
+ *   "content": [{...}, {...}],
  *   "page": 0,
  *   "size": 10,
  *   "totalElements": 47,
  *   "totalPages": 5,
  *   "last": false
  * }
- * 
- * CLIENT USAGE:
- * - Display items from "content" array
- * - Show page indicator: "Page 1 of 5"
- * - Enable/disable next/prev buttons based on "last" and "page"
+ * </pre>
+ *
+ * @param <T> the type of elements contained in this page
  */
+@Getter
+@Builder
 public class PageResponse<T> {
 
+    /** List of items on the current page. */
     private List<T> content;
+
+    /** Zero-based index of the current page. */
     private int page;
+
+    /** Maximum number of items per page. */
     private int size;
+
+    /** Total number of elements across all pages. */
     private long totalElements;
+
+    /** Total number of available pages. */
     private int totalPages;
+
+    /** {@code true} if this is the last page of results. */
     private boolean last;
 }

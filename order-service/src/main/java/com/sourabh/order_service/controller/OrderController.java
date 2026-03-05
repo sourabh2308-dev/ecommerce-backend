@@ -15,35 +15,51 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * ORDER CONTROLLER - REST API Endpoints for Order Management
+ * Primary REST controller for order lifecycle management.
  *
- * This controller handles all order-related REST endpoints. It enforces authorization via
- * @PreAuthorize, extracts user context from headers (injected by API Gateway), and delegates
- * business logic to OrderService. Responses are in JSON format.
+ * <p>Handles creation, retrieval, status updates, and payment-status updates
+ * for orders. Authorization is enforced via {@code @PreAuthorize} annotations;
+ * user context (UUID, role) is extracted from headers injected by the API
+ * Gateway after JWT validation. Business logic is delegated to
+ * {@link OrderService}.</p>
  *
- * BASE PATH: /api/order
- * Auth: JWT validation at API Gateway + role-based @PreAuthorize on methods
+ * <p>Key flows:
+ * <ul>
+ *   <li><strong>Order creation</strong> — triggers the payment saga and
+ *       publishes an {@code order.created} Kafka event.</li>
+ *   <li><strong>Payment update</strong> — internal endpoint called by the
+ *       payment-service to complete the saga.</li>
+ *   <li><strong>Multi-seller splitting</strong> — sub-orders and order groups
+ *       can be queried via dedicated endpoints.</li>
+ * </ul>
+ *
+ * <p>Base path: {@code /api/order}</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ * @see OrderService
  */
-// REST API Controller - Handles HTTP requests and responses
 @RestController
 @RequestMapping("/api/order")
 @RequiredArgsConstructor
 @Slf4j
 public class OrderController {
 
+    /** Service layer encapsulating order business logic. */
     private final OrderService orderService;
 
     /**
-     * POST /api/order - Create new order (BUYER only)
+     * Creates a new order for the authenticated buyer.
      *
-     * Creates a new order with provided items and shipping details. Only BUYERs can access.
-     * The endpoint is part of a saga pattern: order creation triggers async payment processing.
-     * Response contains order details with paymentStatus = PENDING until payment completes.
+     * <p>The order is persisted with status {@code CREATED} and payment status
+     * {@code PENDING}. An asynchronous payment saga is initiated via Kafka so
+     * the buyer can poll for the final payment result.</p>
      *
-     * Request: Valid CreateOrderRequest with items and shipping address
-     * Response: OrderResponse with generated UUID and initial status CREATED
-     * Authorization: @PreAuthorize("hasRole('BUYER')")
-     * Errors: 400 (validation), 401 (auth), 403 (role), 404 (product not found)
+     * @param request     validated {@link CreateOrderRequest} containing items
+     *                    and shipping details
+     * @param httpRequest the servlet request carrying gateway-injected headers
+     * @return {@link ResponseEntity} containing the created {@link OrderResponse}
      */
     @PreAuthorize("hasRole('BUYER')")
     @PostMapping
@@ -61,70 +77,21 @@ public class OrderController {
     }
 
     /**
-     * GET /api/order - List orders with pagination (BUYER/ADMIN)
+     * Returns a paginated list of orders, filtered by the caller's role.
      *
-     * Returns paginated list of orders filtered by role:
-     * - BUYER: Only their own orders
-     * - ADMIN: All orders
+     * <ul>
+     *   <li>{@code BUYER} — sees only their own orders.</li>
+     *   <li>{@code ADMIN} — sees all orders.</li>
+     * </ul>
      *
-     * Query params: page (0-indexed), size (default 10)
-     * Response: PageResponse with orders, pagination metadata
-     * Sorting: By createdAt DESC (newest first)
+     * <p>Results are sorted by creation date descending (newest first).</p>
+     *
+     * @param page        zero-based page index (default {@code 0})
+     * @param size        number of records per page (default {@code 10})
+     * @param httpRequest the servlet request carrying gateway-injected headers
+     * @return {@link ResponseEntity} containing a {@link PageResponse} of
+     *         {@link OrderResponse}
      */
-    /**
-
-     * API ENDPOINT
-
-     * 
-
-     * HTTP Method: GET
-
-     * 
-
-     * PURPOSE:
-
-     * Handles HTTP requests for this endpoint. Validates input, delegates to service
-
-     * layer for business logic, and returns JSON response.
-
-     * 
-
-     * PROCESS FLOW:
-
-     * 1. API Gateway forwards request after JWT validation
-
-     * 2. Spring deserializes JSON to request object
-
-     * 3. @Valid triggers bean validation (if present)
-
-     * 4. @PreAuthorize checks user role (if present)
-
-     * 5. Service layer executes business logic
-
-     * 6. Response object serialized to JSON
-
-     * 7. HTTP status code sent (200/201/400/403/404/500)
-
-     * 
-
-     * SECURITY:
-
-     * - JWT validation at API Gateway (user authenticated)
-
-     * - Role-based access via @PreAuthorize annotation
-
-     * - Input validation via @Valid and constraint annotations
-
-     * 
-
-     * ERROR HANDLING:
-
-     * - Service exceptions caught by GlobalExceptionHandler
-
-     * - Returns standardized error response with HTTP status
-
-     */
-
     @PreAuthorize("hasAnyRole('BUYER', 'ADMIN')")
     @GetMapping
     public ResponseEntity<PageResponse<OrderResponse>> listOrders(
@@ -142,10 +109,14 @@ public class OrderController {
     }
 
     /**
-     * GET /api/order/seller - List seller's orders (SELLER only)
+     * Returns a paginated list of orders containing items sold by the
+     * authenticated seller.
      *
-     * Returns paginated orders for the authenticated seller.
-     * Only sellers can access their own order list.
+     * @param page    zero-based page index (default {@code 0})
+     * @param size    number of records per page (default {@code 10})
+     * @param request the servlet request carrying gateway-injected headers
+     * @return {@link ResponseEntity} containing a {@link PageResponse} of
+     *         {@link OrderResponse}
      */
     @PreAuthorize("hasRole('SELLER')")
     @GetMapping("/seller")
@@ -162,17 +133,18 @@ public class OrderController {
     }
 
     /**
-     * GET /api/order/{uuid} - Retrieve single order details
+     * Retrieves full details of a single order by its UUID.
      *
-     * Fetches complete order details including items, shipping info, and payment status.
-     * Authorization is enforced at service layer:
-     * - BUYER: Can only see their own orders
-     * - SELLER: Can see orders containing their items
-     * - ADMIN: Can see any order
+     * <p>Visibility rules are enforced at the service layer:
+     * <ul>
+     *   <li>{@code BUYER} — may view only their own orders.</li>
+     *   <li>{@code SELLER} — may view orders containing their items.</li>
+     *   <li>{@code ADMIN} — may view any order.</li>
+     * </ul>
      *
-     * Path vars: uuid (order ID)
-     * Response: OrderResponse with all order details
-     * Errors: 404 (order not found), 403 (no permission)
+     * @param uuid        the order UUID
+     * @param httpRequest the servlet request carrying gateway-injected headers
+     * @return {@link ResponseEntity} containing the {@link OrderResponse}
      */
     @GetMapping("/{uuid}")
     public ResponseEntity<OrderResponse> getOrder(
@@ -184,14 +156,18 @@ public class OrderController {
     }
 
     /**
-     * PUT /api/order/{uuid}/status - Update order status
+     * Updates the lifecycle status of an order.
      *
-     * Updates order status. Different roles can perform different transitions:
-     * - ADMIN/SELLER: Can update status (exact transitions controlled by service layer)
+     * <p>Allowed transitions depend on the caller's role and are enforced by
+     * the service layer. Optionally accepts return metadata when the new
+     * status involves a return request.</p>
      *
-     * Path vars: uuid (order ID)
-     * Query params: status (new status value)
-     * Response: Updated OrderResponse
+     * @param uuid         the order UUID
+     * @param status       the target {@link com.sourabh.order_service.entity.OrderStatus} as a string
+     * @param returnType   optional return type ({@code REFUND} or {@code EXCHANGE})
+     * @param returnReason optional free-text reason for the return
+     * @param request      the servlet request carrying gateway-injected headers
+     * @return {@link ResponseEntity} containing the updated {@link OrderResponse}
      */
     @PreAuthorize("hasAnyRole('BUYER', 'ADMIN', 'SELLER')")
     @PutMapping("/{uuid}/status")
@@ -211,23 +187,15 @@ public class OrderController {
     }
 
     /**
-     * PUT /api/order/internal/payment-update/{uuid} - Internal payment saga endpoint
+     * Internal endpoint invoked by the payment-service to report the outcome
+     * of payment processing as part of the asynchronous saga.
      *
-     * INTERNAL ENDPOINT - Called only by payment-service, not exposed to clients.
-     * Updates order payment status after payment processing completes.
-     * Part of async saga pattern: payment service publishes event → calls this endpoint.
+     * <p>Not exposed to end-users; protected by the {@code X-Internal-Secret}
+     * header validated at the API Gateway.</p>
      *
-     * Path vars: uuid (order ID)
-     * Query params: status (payment result: SUCCESS or FAILED)
-     * Response: 200 OK empty body
-     * Auth: Validated by API Gateway (X-Internal-Secret header)
-     *
-     * Saga flow:
-     * 1. Client creates order (POST /api/order)
-     * 2. Service publishes order.created event
-     * 3. Payment service processes payment
-     * 4. Payment service calls this endpoint with result
-     * 5. Order status updated, client polls GET /api/order/{uuid}
+     * @param uuid   the order UUID
+     * @param status the payment result ({@code SUCCESS} or {@code FAILED})
+     * @return {@link ResponseEntity} with HTTP 200 and empty body
      */
     @PutMapping("/internal/payment-update/{uuid}")
     public ResponseEntity<Void> updatePaymentStatus(
@@ -239,13 +207,15 @@ public class OrderController {
     }
 
     /**
-     * GET /api/order/{uuid}/sub-orders - Get all sub-orders for a parent order
-     * 
-     * Used to view order splits for multi-seller orders.
-     * Returns empty list if order is not split.
-     * 
-     * Response: 200 OK with list of OrderResponse
-     * Auth: Buyer can only see their own orders, admin can see all
+     * Retrieves all sub-orders derived from a multi-seller parent order.
+     *
+     * <p>Returns an empty list if the order was not split.</p>
+     *
+     * @param uuid     UUID of the parent order
+     * @param role     the caller's role (from {@code X-User-Role} header)
+     * @param userUuid the caller's UUID (from {@code X-User-UUID} header)
+     * @return {@link ResponseEntity} containing a list of sub-order
+     *         {@link OrderResponse} objects
      */
     @GetMapping("/{uuid}/sub-orders")
     public ResponseEntity<List<OrderResponse>> getSubOrders(
@@ -258,12 +228,14 @@ public class OrderController {
     }
 
     /**
-     * GET /api/order/group/{groupId} - Get all orders in a group
-     * 
-     * Returns main order + all sub-orders sharing the same orderGroupId.
-     * 
-     * Response: 200 OK with list of OrderResponse
-     * Auth: Buyer can only see their own orders, admin can see all
+     * Retrieves all orders sharing the same order group identifier, including
+     * the main order and every sub-order.
+     *
+     * @param groupId  the shared order group ID
+     * @param role     the caller's role (from {@code X-User-Role} header)
+     * @param userUuid the caller's UUID (from {@code X-User-UUID} header)
+     * @return {@link ResponseEntity} containing a list of grouped
+     *         {@link OrderResponse} objects
      */
     @GetMapping("/group/{groupId}")
     public ResponseEntity<List<OrderResponse>> getOrderGroup(

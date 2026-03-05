@@ -33,199 +33,67 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Implementation of {@link UserService} containing all core user-management business logic.
+ *
+ * <p>This service is the authoritative source for user data across the microservices
+ * architecture.  It covers:</p>
+ * <ul>
+ *   <li><strong>Registration &amp; Verification</strong> &ndash; account creation with BCrypt
+ *       password hashing and time-bound 6-digit OTP email verification.</li>
+ *   <li><strong>Profile Management</strong> &ndash; name/phone updates, password changes,
+ *       and soft-delete/restore with the {@code isDeleted} flag.</li>
+ *   <li><strong>Seller On-boarding</strong> &ndash; business detail submission, admin
+ *       approval/rejection, and status transitions through
+ *       {@code PENDING_DETAILS -> PENDING_APPROVAL -> ACTIVE}.</li>
+ *   <li><strong>Admin Operations</strong> &ndash; block/unblock, soft-delete/restore,
+ *       paginated user listing with optional role/status filters.</li>
+ *   <li><strong>Internal Lookups</strong> &ndash; email/UUID-based user retrieval consumed
+ *       by auth-service via OpenFeign, with Redis caching for high read throughput.</li>
+ *   <li><strong>Forgot/Reset Password</strong> &ndash; OTP-based password reset flow
+ *       initiated from auth-service.</li>
+ * </ul>
+ *
+ * <p><strong>Caching Strategy:</strong> Read-heavy paths ({@code getProfile},
+ * {@code getUserByEmailInternal}) are cached in Redis.  Every write operation
+ * evicts the relevant cache entries to ensure consistency.</p>
+ *
+ * @see UserService
+ * @see UserRepository
+ * @see OTPVerificationRepository
+ * @see SellerDetailRepository
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-/**
- * ═══════════════════════════════════════════════════════════════════════════
- * USER SERVICE IMPLEMENTATION - Core User Management Business Logic
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Implements comprehensive user lifecycle management including registration, verification,
- * profile management, seller onboarding, and administrative operations. This service is
- * the authoritative source for user data in the microservices architecture.
- * 
- * KEY RESPONSIBILITIES:
- * --------------------
- * 1. User Registration & Verification:
- *    - Create new user accounts with encrypted passwords (BCrypt)
- *    - Generate and validate time-bound OTP codes for email verification
- *    - Handle OTP expiration and resend logic
- * 
- * 2. Profile Management:
- *    - Update user information (name, email, password)
- *    - Maintain user state (verified, suspended, deleted)
- *    - Soft delete pattern (isDeleted flag, not physical deletion)
- * 
- * 3. Seller Onboarding:
- *    - Upgrade BUYER to SELLER role
- *    - Collect and validate business information
- *    - Maintain seller-specific data (business name, tax info, bank details)
- * 
- * 4. Role-Based Access Control:
- *    - Enforce authorization rules before data access
- *    - Validate user ownership of resources
- *    - Support BUYER, SELLER, ADMIN roles
- * 
- * 5. Caching Strategy:
- *    - Cache user lookups by UUID/email (high read frequency)
- *    - Evict cache on updates to ensure consistency
- *    - Redis-backed distributed cache
- * 
- * ARCHITECTURE PATTERNS:
- * ----------------------
- * - Service Layer Pattern: Separates business logic from controllers
- * - Repository Pattern: Abstracts database access via JPA repositories
- * - DTO Pattern: Converts entities to response DTOs (hides sensitive data)
- * - Cache-Aside Pattern: @Cacheable for reads, @CacheEvict for writes
- * - Soft Delete Pattern: isDeleted flag instead of physical row deletion
- * 
- * ANNOTATIONS EXPLAINED:
- * ----------------------
- * @Service:
- *   - Marks this as Spring service bean
- *   - Auto-detected by component scanning
- *   - Registered in application context for dependency injection
- * 
- * @Transactional:
- *   - Wraps methods in database transactions
- *   - Automatic rollback on RuntimeException
- *   - Ensures ACID properties (Atomicity, Consistency, Isolation, Durability)
- *   - Uses Spring's PlatformTransactionManager
- * 
- * @Cacheable("usersCache", key = "#uuid"):
- *   - Caches method result in Redis
- *   - Key format: usersCache::uuid-value
- *   - Subsequent calls with same UUID return cached value (no DB hit)
- *   - TTL configured in RedisCacheConfig
- * 
- * @CacheEvict:
- *   - Removes entries from cache when data changes
- *   - allEntries = true: Clears entire cache
- *   - beforeInvocation = false: Evicts after successful method execution
- * 
- * @Caching:
- *   - Combines multiple cache operations
- *   - Example: Evict both usersCache and sellersCache simultaneously
- * 
- * SECURITY CONSIDERATIONS:
- * ------------------------
- * - Passwords encrypted with BCrypt (cost factor 10)
- * - OTP codes are random 6-digit numbers (100,000 to 999,999)
- * - OTP validity: 10 minutes (configurable)
- * - Sensitive fields (password hash) excluded from response DTOs
- * - Authorization checks before sensitive operations
- * 
- * DATABASE TRANSACTIONS:
- * ----------------------
- * - User registration: Insert user + insert OTP (atomic)
- * - OTP verification: Update user + delete OTP (atomic)
- * - Seller registration: Insert user + insert seller_detail (atomic)
- * - User update: Update user + evict cache (atomic)
- * 
- * ERROR HANDLING:
- * ---------------
- * Custom exceptions thrown for business rule violations:
- * - UserNotFoundException: User UUID/email not found
- * - UserAlreadyExistsException: Duplicate email registration
- * - UserStateException: Invalid state transition (e.g., verify already verified user)
- * - OTPException: Invalid/expired OTP, too many attempts
- * 
- * CACHING STRATEGY:
- * -----------------
- * Cache Key Format:
- * - User by UUID: usersCache::{uuid}
- * - User by email: usersCache::{email}
- * - Seller by UUID: sellersCache::{uuid}
- * 
- * Cache Eviction Triggers:
- * - User update: Evict user's UUID and email keys
- * - User deletion: Evict user's UUID and email keys
- * - Seller registration: Evict seller cache
- * 
- * TTL (Time-To-Live):
- * - Configured in RedisCacheConfig
- * - Default: 1 hour for user data
- * - Prevents stale data while reducing DB load
- * 
- * EXAMPLE FLOWS:
- * --------------
- * 
- * Flow 1: User Registration
- * registerUser(RegisterRequest)
- * → Check if email exists (throw UserAlreadyExistsException if yes)
- * → Hash password with BCrypt
- * → Create User entity (isVerified = false, role from request)
- * → Save to database
- * → Generate 6-digit random OTP
- * → Create OTPVerification entity (expiresAt = now + 10 min)
- * → Save OTP to database
- * → Log OTP (in production, send email via email service)
- * → Convert User to UserResponse
- * → Return UserResponse
- * 
- * Flow 2: OTP Verification
- * verifyOTP(VerifyOTPRequest)
- * → Find user by email (throw UserNotFoundException if not found)
- * → Check if already verified (throw UserStateException if yes)
- * → Find OTP by email (throw OTPException if not found)
- * → Check OTP not expired (throw OTPException if expired)
- * → Check OTP matches (throw OTPException if wrong)
- * → Mark user.isVerified = true
- * → Delete OTP record
- * → Commit transaction
- * → Return success message
- * 
- * Flow 3: Get User (with caching)
- * getUserByUuid(uuid)
- * → Check cache: usersCache::{uuid}
- * → If cache hit: Return cached UserResponse (no DB query)
- * → If cache miss:
- *    → Query database by UUID
- *    → Throw UserNotFoundException if not found
- *    → Check isDeleted = false
- *    → Convert to UserResponse
- *    → Store in cache
- *    → Return UserResponse
- * 
- * Flow 4: Update User (with cache eviction)
- * updateUser(uuid, UpdateUserRequest)
- * → Fetch user from DB by UUID
- * → Validate ownership (uuid matches logged-in user)
- * → Update allowed fields (firstName, lastName)
- * → Save updated entity
- * → Evict cache: usersCache::{uuid}
- * → Convert to UserResponse
- * → Return UserResponse
- * 
- * TESTING NOTES:
- * --------------
- * - Mock repositories and password encoder in unit tests
- * - Use @MockBean for testing @Cacheable behavior
- * - Test transaction rollback with @Transactional(propagation = NEVER)
- * - Verify cache eviction after updates
- * - Test OTP expiration logic with fixed clock
- */
 public class UserServiceImpl implements UserService {
 
+    /** JPA repository for {@link User} entity persistence. */
     private final UserRepository userRepository;
+
+    /** JPA repository for {@link OTPVerification} entity persistence. */
     private final OTPVerificationRepository otpRepository;
+
+    /** JPA repository for {@link SellerDetail} entity persistence. */
     private final SellerDetailRepository sellerDetailRepository;
+
+    /** BCrypt password encoder for hashing and verifying passwords. */
     private final PasswordEncoder passwordEncoder;
+
+    /** Email service for sending OTP and notification emails. */
     private final EmailService emailService;
 
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>If a soft-deleted or unverified row already exists for the given email,
+     * it is reused (fields are overwritten) rather than creating a duplicate.
+     * A fresh OTP is generated and emailed in all cases.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "usersByEmail", allEntries = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public UserResponse registerUser(RegisterRequest request) {
 
         String normalizedEmail = normalizeEmail(request.getEmail());
@@ -235,15 +103,12 @@ public class UserServiceImpl implements UserService {
         if (existingUserOptional.isPresent()) {
             User existingUser = existingUserOptional.get();
 
-            // if the record isn't soft-deleted and the email is already verified
-            // in a non-pending state we consider the address taken.
             if (!existingUser.isDeleted()
                     && existingUser.isEmailVerified()
                     && existingUser.getStatus() != UserStatus.PENDING_VERIFICATION) {
                 throw new UserAlreadyExistsException("Email already registered");
             }
 
-            // Reset state for deleted or unverified users so the row can be reused
             existingUser.setDeleted(false);
             existingUser.setFirstName(request.getFirstName());
             existingUser.setLastName(request.getLastName());
@@ -280,15 +145,17 @@ public class UserServiceImpl implements UserService {
         return mapToResponse(user);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Validates the OTP against the most recent record for the user.  On success,
+     * the user's {@code emailVerified} flag is set and their status advances to
+     * {@code ACTIVE} (buyers) or {@code PENDING_DETAILS} (sellers).  Brute-force
+     * protection locks the OTP after 5 failed attempts.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "usersByEmail", allEntries = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String verifyOTP(VerifyOTPRequest request) {
 
         User user = userRepository.findByEmailIgnoreCase(normalizeEmail(request.getEmail()))
@@ -310,7 +177,6 @@ public class UserServiceImpl implements UserService {
             throw new OTPException("OTP expired");
         }
 
-        // Block brute-force after 5 failed attempts
         if (otp.getAttemptCount() >= 5) {
             throw new OTPException("OTP locked - too many failed attempts. Please request a new OTP.");
         }
@@ -337,20 +203,12 @@ public class UserServiceImpl implements UserService {
         return "OTP verified successfully";
     }
 
-    // ========================
-    // Helper Methods
-    // ========================
-
     /**
-     * GENERATEANDSENDOTP - Method Documentation
+     * Generates a cryptographically random 6-digit OTP, persists it with a 5-minute
+     * expiry, and sends it to the user's email address.
      *
-     * PURPOSE:
-     * This method handles the generateAndSendOTP operation.
-     *
-     * PARAMETERS:
-     * @param user - User value
-     * @param type - OTPType value
-     *
+     * @param user the user to send the OTP to
+     * @param type the OTP type ({@code EMAIL} for registration, {@code PASSWORD_RESET} for forgot-password)
      */
     private void generateAndSendOTP(User user, OTPType type) {
 
@@ -365,7 +223,6 @@ public class UserServiceImpl implements UserService {
 
         otpRepository.save(otp);
 
-        // Send OTP via email
         String subject = (type == OTPType.PASSWORD_RESET)
                 ? "Password Reset OTP"
                 : "Email Verification OTP";
@@ -375,17 +232,11 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * MAPTORESPONSE - Method Documentation
+     * Converts a {@link User} entity to a {@link UserResponse} DTO, excluding
+     * sensitive fields such as the password hash.
      *
-     * PURPOSE:
-     * This method handles the mapToResponse operation.
-     *
-     * PARAMETERS:
-     * @param user - User value
-     *
-     * RETURN VALUE:
-     * @return UserResponse - Result of the operation
-     *
+     * @param user the user entity to convert
+     * @return the client-safe response DTO
      */
     private UserResponse mapToResponse(User user) {
 
@@ -402,20 +253,18 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
-    // ─── SELLER DETAIL METHODS ───
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Only sellers in {@code PENDING_DETAILS} status may submit.  On success
+     * the seller's status advances to {@code PENDING_APPROVAL}.</p>
+     */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public SellerDetailResponse submitSellerDetails(String userUuid, SellerDetailRequest request) {
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -428,7 +277,6 @@ public class UserServiceImpl implements UserService {
             throw new UserStateException("Seller is not in the details submission stage. Current status: " + user.getStatus());
         }
 
-        // Check if details already submitted
         if (sellerDetailRepository.existsByUser(user)) {
             throw new UserStateException("Seller details already submitted");
         }
@@ -454,7 +302,6 @@ public class UserServiceImpl implements UserService {
 
         sellerDetailRepository.save(detail);
 
-        // Move seller to PENDING_APPROVAL
         user.setStatus(UserStatus.PENDING_APPROVAL);
         userRepository.save(user);
 
@@ -462,14 +309,13 @@ public class UserServiceImpl implements UserService {
         return mapSellerDetailToResponse(detail);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Only users with role {@code SELLER} may call this endpoint.</p>
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public SellerDetailResponse getSellerDetails(String userUuid) {
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -484,14 +330,13 @@ public class UserServiceImpl implements UserService {
         return mapSellerDetailToResponse(detail);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Admin-only view of a seller's submitted verification details.</p>
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public SellerDetailResponse getSellerDetailsByAdmin(String sellerUuid) {
         User user = userRepository.findByUuid(sellerUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -507,17 +352,10 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * MAPSELLERDETAILTORESPONSE - Method Documentation
+     * Converts a {@link SellerDetail} entity to a {@link SellerDetailResponse} DTO.
      *
-     * PURPOSE:
-     * This method handles the mapSellerDetailToResponse operation.
-     *
-     * PARAMETERS:
-     * @param detail - SellerDetail value
-     *
-     * RETURN VALUE:
-     * @return SellerDetailResponse - Result of the operation
-     *
+     * @param detail the seller detail entity
+     * @return the corresponding response DTO
      */
     private SellerDetailResponse mapSellerDetailToResponse(SellerDetail detail) {
         return SellerDetailResponse.builder()
@@ -540,18 +378,19 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Verifies that the seller's email is verified, role is {@code SELLER},
+     * status is {@code PENDING_APPROVAL}, and business details have been submitted.
+     * On approval, status becomes {@code ACTIVE} and {@code verifiedAt} is stamped.</p>
+     */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String approveSeller(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -569,7 +408,6 @@ public class UserServiceImpl implements UserService {
             throw new UserStateException("Seller is not pending approval");
         }
 
-        // Verify seller has submitted business/ID details
         if (!sellerDetailRepository.existsByUser(user)) {
             throw new UserStateException("Seller has not submitted verification details");
         }
@@ -577,7 +415,6 @@ public class UserServiceImpl implements UserService {
         user.setStatus(UserStatus.ACTIVE);
         user.setApproved(true);
 
-        // Mark seller details as verified
         sellerDetailRepository.findByUser(user).ifPresent(detail -> {
             detail.setVerifiedAt(LocalDateTime.now());
             sellerDetailRepository.save(detail);
@@ -589,18 +426,17 @@ public class UserServiceImpl implements UserService {
         return "Seller approved successfully";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Sets the seller's status to {@code BLOCKED} and clears the approval flag.</p>
+     */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String rejectSeller(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -618,18 +454,13 @@ public class UserServiceImpl implements UserService {
         return "Seller rejected successfully";
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String blockUser(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -643,6 +474,12 @@ public class UserServiceImpl implements UserService {
         return "User blocked successfully";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Supports optional filtering by role and/or status.  Sorting direction
+     * and field are configurable via parameters.</p>
+     */
     @Override
     public PageResponse<UserResponse> getAllUsers(
             int page,
@@ -700,18 +537,13 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String softDeleteUser(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
@@ -726,25 +558,26 @@ public class UserServiceImpl implements UserService {
         return "User soft deleted successfully";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Sellers who were soft-deleted need re-approval unless already approved.
+     * The appropriate intermediate status ({@code PENDING_DETAILS} or
+     * {@code PENDING_APPROVAL}) is restored based on whether business details
+     * have been submitted.</p>
+     */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String restoreUser(String userUuid) {
 
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         user.setDeleted(false);
-        // Sellers need re-approval after being restored; check if they submitted details
         if (user.getRole() == Role.SELLER && !user.isApproved()) {
             if (sellerDetailRepository.existsByUser(user)) {
                 user.setStatus(UserStatus.PENDING_APPROVAL);
@@ -761,6 +594,7 @@ public class UserServiceImpl implements UserService {
         return "User restored successfully";
     }
 
+    /** {@inheritDoc} */
     @Override
     public PageResponse<UserResponse> searchUsers(
             String keyword,
@@ -791,15 +625,15 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Rate-limited: if the most recent OTP was sent less than 60 seconds ago
+     * the request is rejected to prevent abuse.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "usersByEmail", allEntries = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String resendOTP(String email) {
 
         String normalizedEmail = normalizeEmail(email);
@@ -824,59 +658,49 @@ public class UserServiceImpl implements UserService {
         return "OTP resent successfully";
     }
 
-    // ─────────────────────────────────────────────
-    // INTERNAL — cached for auth-service lookups
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Results are cached in {@code usersByEmail} keyed by the lowercase email.
+     * Returns {@code null} (not an exception) when the email is not found, allowing
+     * auth-service to handle the 404 logic.</p>
+     */
     @Override
     @Cacheable(value = "usersByEmail", key = "#email == null ? '' : #email.toLowerCase()")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public InternalUserDto getUserByEmailInternal(String email) {
         String normalizedEmail = normalizeEmail(email);
-        log.debug("Cache miss for usersByEmail email={} — fetching from DB", normalizedEmail);
+        log.debug("Cache miss for usersByEmail email={} -- fetching from DB", normalizedEmail);
         return userRepository.findByEmailIgnoreCase(normalizedEmail)
                 .map(this::toInternalDto)
                 .orElse(null);
     }
 
+    /**
+     * Normalizes an email address by trimming whitespace and converting to lowercase.
+     *
+     * @param email the raw email input
+     * @return the normalized email, or {@code null} if the input is null
+     */
     private String normalizeEmail(String email) {
         return email == null ? null : email.trim().toLowerCase();
     }
 
+    /** {@inheritDoc} */
     @Override
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public InternalUserDto getUserByUuidInternal(String uuid) {
-        log.debug("Cache miss for usersByUuid uuid={} — fetching from DB", uuid);
+        log.debug("Cache miss for usersByUuid uuid={} -- fetching from DB", uuid);
         return userRepository.findByUuid(uuid)
                 .map(this::toInternalDto)
                 .orElse(null);
     }
 
     /**
-     * TOINTERNALDTO - Method Documentation
+     * Converts a {@link User} entity to an {@link InternalUserDto} for
+     * service-to-service communication.  Includes the password hash so that
+     * auth-service can perform credential verification.
      *
-     * PURPOSE:
-     * This method handles the toInternalDto operation.
-     *
-     * PARAMETERS:
-     * @param user - User value
-     *
-     * RETURN VALUE:
-     * @return InternalUserDto - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @Transactional - Wraps in database transaction (atomic execution)
-     *
+     * @param user the user entity
+     * @return the internal DTO with sensitive fields included
      */
     private InternalUserDto toInternalDto(User user) {
         return InternalUserDto.builder()
@@ -889,18 +713,13 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────
-    // PROFILE MANAGEMENT (authenticated user)
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Cached in {@code profileByUuid} for fast repeated lookups by the frontend.</p>
+     */
     @Override
     @Cacheable(value = "profileByUuid", key = "#userUuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public UserResponse getProfile(String userUuid) {
         log.debug("getProfile: uuid={}", userUuid);
         User user = userRepository.findByUuid(userUuid)
@@ -908,18 +727,18 @@ public class UserServiceImpl implements UserService {
         return mapToResponse(user);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Only non-null fields in the request are applied to the entity.
+     * Evicts both {@code profileByUuid} and {@code usersByEmail} caches.</p>
+     */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public UserResponse updateProfile(String userUuid, UpdateProfileRequest request) {
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -933,14 +752,14 @@ public class UserServiceImpl implements UserService {
         return mapToResponse(user);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Verifies the current password before applying the change.  The new password
+     * and confirmation must match.</p>
+     */
     @Override
     @Transactional
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String changePassword(String userUuid, ChangePasswordRequest request) {
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -958,22 +777,19 @@ public class UserServiceImpl implements UserService {
         return "Password changed successfully";
     }
 
-    // ─────────────────────────────────────────────
-    // UNBLOCK USER (Admin)
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>For blocked sellers who have not yet been approved, the status is restored
+     * to {@code PENDING_APPROVAL} or {@code PENDING_DETAILS} depending on whether
+     * business details have been submitted.</p>
+     */
     @Override
     @Transactional
     @Caching(evict = {
             @CacheEvict(value = "profileByUuid",  key = "#userUuid"),
             @CacheEvict(value = "usersByEmail", allEntries = true)
     })
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String unblockUser(String userUuid) {
         User user = userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
@@ -982,7 +798,6 @@ public class UserServiceImpl implements UserService {
             throw new UserStateException("User is not blocked");
         }
 
-        // Sellers who were blocked need re-approval unless already approved
         if (user.getRole() == Role.SELLER && !user.isApproved()) {
             if (sellerDetailRepository.existsByUser(user)) {
                 user.setStatus(UserStatus.PENDING_APPROVAL);
@@ -998,10 +813,12 @@ public class UserServiceImpl implements UserService {
         return "User unblocked successfully";
     }
 
-    // ─────────────────────────────────────────────
-    // FORGOT PASSWORD (internal, called by auth-service)
-    // ─────────────────────────────────────────────
-
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Validates that the user's email is verified and account is active before
+     * generating a {@code PASSWORD_RESET} OTP.</p>
+     */
     @Override
     @Transactional
     public String forgotPassword(String email) {
@@ -1021,6 +838,13 @@ public class UserServiceImpl implements UserService {
         return "Password reset OTP sent successfully";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Validates the password-reset OTP (expiry, attempt count, correctness),
+     * then hashes and persists the new password.  The OTP is marked as verified
+     * to prevent reuse.</p>
+     */
     @Override
     @Transactional
     @CacheEvict(value = "usersByEmail", allEntries = true)
@@ -1062,4 +886,3 @@ public class UserServiceImpl implements UserService {
     }
 
 }
-

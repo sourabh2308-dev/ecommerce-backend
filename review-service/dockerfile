@@ -1,47 +1,31 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# MULTI-STAGE DOCKERFILE FOR REVIEW-SERVICE MICROSERVICE
-# ═══════════════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------
+# review-service Dockerfile — Multi-Stage Build
+# ---------------------------------------------------------------
+# Produces a lean production image for the review-service micro-
+# service, which manages product reviews and ratings. The service
+# verifies purchases via Feign (order-service), publishes
+# ReviewSubmittedEvent to Kafka, and uses Redis for caching.
 #
-# PURPOSE:
-# Creates optimized Docker image for review-service using multi-stage build pattern.
-# Separates build environment from runtime environment to minimize final image size.
-#
-# STAGES:
-# 1. Builder Stage: Compiles Java source code and packages JAR file
-# 2. Runtime Stage: Runs the application with minimal dependencies
-#
-# BENEFITS:
-# - Smaller image size (only JRE + JAR, no Maven or source code)
-# - Faster deployment (less data to transfer)
-# - Better security (no build tools in production image)
-# - Layer caching (dependencies cached separately from source)
-#
-# ═══════════════════════════════════════════════════════════════════════════════
+# Build:  docker build -t review-service .
+# Run:    docker run -p 8080:8080 review-service
+#         (typically launched via docker-compose.yml)
+# ---------------------------------------------------------------
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: BUILD STAGE
-# ─────────────────────────────────────────────────────────────────────────────
-# Base image: Maven 3.9 with Eclipse Temurin JDK 17 on Alpine Linux
-# AS builder: Names this stage for reference in later COPY --from=builder
-# Alpine: Minimal Linux distro (~5MB base, vs ~100MB for Ubuntu)
+# ---------------------------------------------------------------
+# Stage 1: Build
+# ---------------------------------------------------------------
+# Uses Maven 3.9 with Eclipse Temurin JDK 17 on Alpine Linux to
+# compile the review-service module. Alpine keeps the builder
+# image small (~5 MB base layer).
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 
-# Set working directory for all subsequent commands in this stage
-# All files will be copied/created here: /workspace
+# All subsequent commands run inside /workspace.
 WORKDIR /workspace
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DEPENDENCY RESOLUTION (Cached Layer)
-# ─────────────────────────────────────────────────────────────────────────────
-# WHY: Copy pom.xml files first to leverage Docker layer caching.
-# If pom.xml doesn't change, Maven won't re-download dependencies on rebuild.
-# This dramatically speeds up builds during development.
-
-# Copy root pom.xml (parent POM with dependency management)
+# Copy every module POM first so that dependency resolution is
+# cached as a Docker layer. Rebuilds that only touch source code
+# skip the expensive "download the internet" step.
 COPY pom.xml .
-
-# Copy all module pom.xml files (multi-module Maven project structure)
-# Even though we only build review-service, Maven needs all POMs to resolve the reactor
 COPY api-gateway/pom.xml api-gateway/
 COPY auth-service/pom.xml auth-service/
 COPY user-service/pom.xml user-service/
@@ -52,80 +36,39 @@ COPY payment-service/pom.xml payment-service/
 COPY eureka-server/pom.xml eureka-server/
 COPY config-server/pom.xml config-server/
 
-# Download all dependencies for review-service module
-# -pl review-service: Build only this module
-# dependency:go-offline: Downloads dependencies to local .m2 repository
-# -B: Batch mode (non-interactive, cleaner logs)
-# --no-transfer-progress: Suppresses download progress (cleaner logs in CI/CD)
-# || true: Don't fail build if some deps unavailable (optional deps)
+# Pre-fetch dependencies for the review-service module only.
+# "|| true" prevents a build failure when optional deps are
+# unavailable in the repository.
 RUN mvn -pl review-service dependency:go-offline -B --no-transfer-progress || true
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SOURCE CODE COMPILATION
-# ─────────────────────────────────────────────────────────────────────────────
-# Copy source code (done AFTER dependency download for better caching)
-# If source changes but dependencies don't, previous RUN layer is reused
+# Copy source code after dependency download so that source-only
+# changes benefit from the cached dependency layer above.
 COPY review-service/src review-service/src
 
-# Compile and package the application
-# -pl review-service: Build this module only
-# package: Executes compile -> test -> package lifecycle phases
-# -DskipTests: Skips unit tests (faster build, tests run separately in CI/CD)
-# -B --no-transfer-progress: Same flags as above for clean output
-# Output: review-service/target/review-service-0.0.1-SNAPSHOT.jar (or similar)
+# Compile, run annotation processors, and package the fat JAR.
+# Tests are skipped here; they run separately in CI.
 RUN mvn -pl review-service package -DskipTests -B --no-transfer-progress
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: RUNTIME STAGE
-# ─────────────────────────────────────────────────────────────────────────────
-# Base image: Eclipse Temurin JRE 17 on Alpine Linux
-# JRE-only (not JDK): Smaller image, only runtime components (no javac compiler)
-# Temurin: OpenJDK distribution from Adoptium (free, production-ready)
-# Alpine: Minimal Linux (~40MB runtime vs ~200MB for Debian-based images)
+# ---------------------------------------------------------------
+# Stage 2: Runtime
+# ---------------------------------------------------------------
+# Uses the JRE-only Temurin image (no compiler) on Alpine to
+# produce a lean production image (~150 MB vs ~500 MB for a
+# full JDK + Maven image).
 FROM eclipse-temurin:17-jre-alpine
 
-# Set working directory in runtime container
 WORKDIR /app
 
-# ─────────────────────────────────────────────────────────────────────────────
-# COPY APPLICATION JAR
-# ─────────────────────────────────────────────────────────────────────────────
-# --from=builder: Copy from build stage (not from host filesystem)
-# /workspace/review-service/target/*.jar: Maven output JAR file
-# app.jar: Rename to generic name for consistent ENTRYPOINT
-# This is the ONLY file needed from build stage (source code discarded)
+# Copy the fat JAR produced by Stage 1 and rename it to a
+# generic name so the ENTRYPOINT stays stable across versions.
 COPY --from=builder /workspace/review-service/target/*.jar app.jar
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EXPOSE PORT
-# ─────────────────────────────────────────────────────────────────────────────
-# Documents that the container listens on port 8080
-# Does NOT actually publish the port (that's done with -p in docker run or docker-compose)
-# This is metadata for documentation and tools like docker ps
+# Document the port the Spring Boot application listens on.
+# Actual publishing is handled by docker-compose / -p flag.
 EXPOSE 8080
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONTAINER STARTUP COMMAND
-# ─────────────────────────────────────────────────────────────────────────────
-# ENTRYPOINT: Command that executes when container starts
-# ["java", "-jar", "app.jar"]: Exec form (preferred over shell form)
-# Exec form: Runs command directly without shell wrapper (PID 1 = Java process)
-# Benefits: Proper signal handling (SIGTERM for graceful shutdown), faster startup
-#
-# JVM will read environment variables configured in docker-compose.yml:
-#   - spring.datasource.url (PostgreSQL connection)
-#   - spring.kafka.bootstrap-servers (Kafka connection)
-#   - eureka.client.service-url (Service discovery)
-#   - JWT secrets, Redis config, etc.
+# Exec form ensures the Java process runs as PID 1 and receives
+# SIGTERM for graceful shutdown. Spring Boot picks up environment
+# variables (datasource URL, Kafka brokers, Redis host, Eureka,
+# etc.) at startup from docker-compose environment entries.
 ENTRYPOINT ["java", "-jar", "app.jar"]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# IMAGE SIZE OPTIMIZATION RESULTS:
-# ─────────────────────────────────────────────────────────────────────────────
-# Multi-stage build reduces image size:
-# - Builder stage (discarded): ~500MB (Maven + JDK + dependencies + source)
-# - Runtime stage (kept): ~150MB (JRE + JAR only)
-# - Alternative (single-stage): ~500MB
-# Savings: ~350MB per service (with 6 services = ~2GB saved)
-#
-# ─────────────────────────────────────────────────────────────────────────────

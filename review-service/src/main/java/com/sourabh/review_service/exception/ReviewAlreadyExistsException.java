@@ -1,28 +1,25 @@
 package com.sourabh.review_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Thrown when a buyer attempts to create a duplicate review for a product
+ * they have already reviewed.
+ *
+ * <p>Business rule: each buyer may submit at most one review per product.
+ * The check is performed in
+ * {@link com.sourabh.review_service.service.impl.ReviewServiceImpl#createReview}.
+ *
+ * <p>Caught by
+ * {@link GlobalExceptionHandler#handleDuplicate(ReviewAlreadyExistsException)}
+ * and mapped to HTTP {@code 409 Conflict}.
+ *
+ * @see GlobalExceptionHandler
  */
 public class ReviewAlreadyExistsException extends RuntimeException {
+
+    /**
+     * Constructs a new {@code ReviewAlreadyExistsException} with the given detail message.
+     *
+     * @param message human-readable description of the duplication conflict
+     */
     public ReviewAlreadyExistsException(String message) { super(message); }
 }

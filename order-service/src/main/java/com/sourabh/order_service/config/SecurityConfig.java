@@ -11,160 +11,43 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * JWT validation happens at the API Gateway; this service trusts the
- * forwarded {@code X-User-Role} header for method-level RBAC via {@code @PreAuthorize}.
+ * Spring Security configuration for the order-service.
+ *
+ * <p>JWT validation is handled at the API Gateway; this service trusts the
+ * {@code X-User-Role} header forwarded by the gateway for role-based access
+ * control via {@code @PreAuthorize} annotations on controller/service methods.</p>
+ *
+ * <p>Key configuration decisions:</p>
+ * <ul>
+ *   <li>CSRF protection is disabled (stateless REST API).</li>
+ *   <li>Form login and HTTP Basic are disabled (token-based auth).</li>
+ *   <li>Session management is set to {@link SessionCreationPolicy#STATELESS}.</li>
+ *   <li>All requests are permitted at the filter chain level; fine-grained
+ *       access control is enforced at the method level with {@code @PreAuthorize}.</li>
+ *   <li>The {@link HeaderRoleAuthenticationFilter} is registered before
+ *       {@link UsernamePasswordAuthenticationFilter} to populate the
+ *       {@link org.springframework.security.core.context.SecurityContextHolder}.</li>
+ * </ul>
+ *
+ * @see HeaderRoleAuthenticationFilter
  */
-// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @EnableMethodSecurity
 @RequiredArgsConstructor
-/**
- * SPRING SECURITY CONFIGURATION - Authentication & Authorization Setup
- * 
- * PURPOSE:
- * Configures Spring Security framework for this microservice.
- * Defines which endpoints require authentication, how tokens are validated,
- * and what roles can access specific resources.
- * 
- * KEY CONCEPTS:
- * 
- * 1. AUTHENTICATION (Who are you?)
- *    - JWT tokens validated by JwtAuthenticationFilter
- *    - User claims extracted and stored in SecurityContext
- * 
- * 2. AUTHORIZATION (What can you do?)
- *    - @PreAuthorize("hasRole('BUYER')") on controller methods
- *    - Checks if authenticated user has required role
- * 
- * CONFIGURATION COMPONENTS:
- * 
- * @Bean SecurityFilterChain:
- *   - Defines URL patterns and access rules
- *   - Example: .requestMatchers("/api/order/**").authenticated()
- *   - Registers custom filters (JWT validation, etc.)
- * 
- * @Bean PasswordEncoder:
- *   - BCrypt for hashing passwords (user-service only)
- *   - Not used in services that don't store passwords
- * 
- * CORS Configuration:
- *   - Allows cross-origin requests from frontend
- *   - Configures allowed origins, methods, headers
- * 
- * STATELESS SESSION:
- *   - sessionCreationPolicy(STATELESS)
- *   - No server-side sessions (JWT is self-contained)
- * 
- * ENDPOINT ACCESS RULES:
- * Common patterns across services:
- * 
- * PUBLIC (No authentication):
- *   - POST /api/user/register
- *   - POST /api/auth/login
- *   - GET /api/product (listing products)
- * 
- * AUTHENTICATED (Any logged-in user):
- *   - GET /api/user/profile
- *   - POST /api/order (role checked in controller)
- * 
- * ROLE-BASED (Specific roles):
- *   - POST /api/product → @PreAuthorize("hasRole('SELLER')")
- *   - GET /api/order/all → @PreAuthorize("hasRole('ADMIN')")
- * 
- * INTERNAL (Service-to-service):
- *   - POST /api/product/internal/** → Validated by InternalSecretFilter
- *   - No JWT required, uses shared secret header
- * 
- * FILTER ORDER:
- * 1. CorsFilter (handle preflight OPTIONS)
- * 2. JwtAuthenticationFilter (extract user from token)
- * 3. Spring Security filters (authorization checks)
- * 4. Controller method execution
- */
-/**
- * SPRING SECURITY CONFIGURATION - Authentication & Authorization Setup
- * 
- * PURPOSE:
- * Configures Spring Security framework for this microservice.
- * Defines which endpoints require authentication, how tokens are validated,
- * and what roles can access specific resources.
- * 
- * KEY CONCEPTS:
- * 
- * 1. AUTHENTICATION (Who are you?)
- *    - JWT tokens validated by JwtAuthenticationFilter
- *    - User claims extracted and stored in SecurityContext
- * 
- * 2. AUTHORIZATION (What can you do?)
- *    - @PreAuthorize("hasRole('BUYER')") on controller methods
- *    - Checks if authenticated user has required role
- * 
- * CONFIGURATION COMPONENTS:
- * 
- * @Bean SecurityFilterChain:
- *   - Defines URL patterns and access rules
- *   - Example: .requestMatchers("/api/order/**").authenticated()
- *   - Registers custom filters (JWT validation, etc.)
- * 
- * @Bean PasswordEncoder:
- *   - BCrypt for hashing passwords (user-service only)
- *   - Not used in services that don't store passwords
- * 
- * CORS Configuration:
- *   - Allows cross-origin requests from frontend
- *   - Configures allowed origins, methods, headers
- * 
- * STATELESS SESSION:
- *   - sessionCreationPolicy(STATELESS)
- *   - No server-side sessions (JWT is self-contained)
- * 
- * ENDPOINT ACCESS RULES:
- * Common patterns across services:
- * 
- * PUBLIC (No authentication):
- *   - POST /api/user/register
- *   - POST /api/auth/login
- *   - GET /api/product (listing products)
- * 
- * AUTHENTICATED (Any logged-in user):
- *   - GET /api/user/profile
- *   - POST /api/order (role checked in controller)
- * 
- * ROLE-BASED (Specific roles):
- *   - POST /api/product → @PreAuthorize("hasRole('SELLER')")
- *   - GET /api/order/all → @PreAuthorize("hasRole('ADMIN')")
- * 
- * INTERNAL (Service-to-service):
- *   - POST /api/product/internal/** → Validated by InternalSecretFilter
- *   - No JWT required, uses shared secret header
- * 
- * FILTER ORDER:
- * 1. CorsFilter (handle preflight OPTIONS)
- * 2. JwtAuthenticationFilter (extract user from token)
- * 3. Spring Security filters (authorization checks)
- * 4. Controller method execution
- */
 public class SecurityConfig {
 
+    /** Filter that reads gateway-forwarded role/UUID headers into the security context. */
     private final HeaderRoleAuthenticationFilter headerRoleAuthFilter;
 
-    @Bean
     /**
-     * SECURITYFILTERCHAIN - Method Documentation
+     * Builds the {@link SecurityFilterChain} bean that defines the HTTP
+     * security policy for the service.
      *
-     * PURPOSE:
-     * This method handles the securityFilterChain operation.
-     *
-     * PARAMETERS:
-     * @param http - HttpSecurity value
-     *
-     * RETURN VALUE:
-     * @return SecurityFilterChain - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @Bean - Applied to this method
-     *
+     * @param http the {@link HttpSecurity} builder provided by Spring Security
+     * @return the fully configured {@link SecurityFilterChain}
+     * @throws Exception if an error occurs during configuration
      */
+    @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(csrf -> csrf.disable())

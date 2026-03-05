@@ -6,8 +6,20 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 /**
- * Stores seller's business and ID verification details.
- * One-to-one relationship with User (only for SELLER role).
+ * JPA entity storing business, identity-verification, and banking
+ * information for a seller on the platform.
+ * <p>
+ * There is a strict one-to-one relationship with {@link User} – only
+ * users whose {@link Role} is {@code SELLER} will have a corresponding
+ * {@code SellerDetail} row. The admin reviews the submitted details
+ * before approving the seller account.
+ * </p>
+ *
+ * <p>Mapped to the {@code seller_details} table. Inherits audit
+ * timestamps from {@link BaseAuditEntity}.</p>
+ *
+ * @see User
+ * @see BaseAuditEntity
  */
 @Entity
 @Table(name = "seller_details")
@@ -18,177 +30,74 @@ import java.time.LocalDateTime;
 @Builder
 public class SellerDetail extends BaseAuditEntity {
 
+    /** Database surrogate primary key. */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
+    /** The user account associated with this seller profile (one-to-one, lazy-loaded). */
     @OneToOne(fetch = FetchType.LAZY)
-    // @OneToOne applied to field below
-    // @OneToOne applied to field below
     @JoinColumn(name = "user_id", nullable = false, unique = true)
-    // @JoinColumn applied to field below
-    // @JoinColumn applied to field below
     private User user;
 
-    // ========================
-    // Business Information
-    // ========================
-
-    /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
-     */
-
-
+    /** Registered business / shop name. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String businessName;
 
+    /** Type of business entity, e.g. INDIVIDUAL, COMPANY, PARTNERSHIP. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    private String businessType; // e.g. INDIVIDUAL, COMPANY, PARTNERSHIP
+    private String businessType;
 
+    /** Goods and Services Tax registration number (up to 20 characters). */
     @Column(length = 20)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String gstNumber;
 
+    /** Permanent Account Number for tax identification (up to 15 characters). */
     @Column(length = 15)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String panNumber;
 
-    // ========================
-    // Address
-    // ========================
-
+    /** Primary street / building address of the business. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String addressLine1;
 
+    /** Optional secondary address line. */
     private String addressLine2;
 
+    /** City where the business is located. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String city;
 
+    /** State or province of the business address. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String state;
 
+    /** Postal / ZIP code (max 10 characters). */
     @Column(nullable = false, length = 10)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String pincode;
 
-    // ========================
-    // ID Verification
-    // ========================
-
+    /** Type of government-issued ID provided, e.g. AADHAAR, PASSPORT, DRIVING_LICENSE. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    private String idType; // e.g. AADHAAR, PASSPORT, DRIVING_LICENSE
+    private String idType;
 
+    /** Government-issued identification number. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String idNumber;
 
-    // ========================
-    // Bank Details
-    // ========================
-
+    /** Bank account number for payout settlement. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String bankAccountNumber;
 
+    /** Indian Financial System Code of the bank branch (up to 20 characters). */
     @Column(nullable = false, length = 20)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String bankIfscCode;
 
+    /** Name of the bank where the seller holds the settlement account. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String bankName;
 
-    // ========================
-    // Timestamps
-    // ========================
-
+    /** Timestamp when the seller submitted their verification details. */
     private LocalDateTime submittedAt;
 
+    /** Timestamp when an admin verified / approved the seller details. */
     private LocalDateTime verifiedAt;
 }

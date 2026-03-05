@@ -14,23 +14,45 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Lightweight Razorpay gateway using plain HTTP calls.  This avoids pulling in
- * the official SDK which may not be accessible in some build environments.
+ * {@link PaymentGateway} implementation that communicates with the
+ * <a href="https://razorpay.com/docs/api/orders/">Razorpay Orders API</a>
+ * using plain HTTP calls via {@link RestTemplate}.
  *
- * The class is only activated when {@code payment.gateway=razorpay}.
+ * <p>This lightweight approach avoids pulling in the official Razorpay SDK,
+ * which may not be available in all build environments.  The class is only
+ * activated when the property {@code payment.gateway=razorpay} is set.
+ *
+ * <p><b>Authentication:</b> HTTP Basic auth using the Razorpay key ID and
+ * key secret.
+ *
+ * <p><b>Webhook verification:</b> Computes an HMAC-SHA256 hash of
+ * {@code "<orderId>|<paymentId>"} using the key secret and compares it
+ * with the signature supplied by the caller (header or body).
+ *
+ * @see com.sourabh.payment_service.config.PaymentGatewayConfig
  */
 @Component
 public class RazorpayGateway implements PaymentGateway {
 
+    /** Razorpay API key identifier. */
     private final String keyId;
+
+    /** Razorpay API key secret used for auth and HMAC verification. */
     private final String keySecret;
-    private final RestTemplate rest; // HTTP client (injected to allow mocking)
+
+    /** HTTP client for outbound Razorpay API calls. */
+    private final RestTemplate rest;
+
+    /** Jackson mapper for parsing Razorpay JSON responses. */
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
-     * Primary constructor used by Spring; a RestTemplate bean may be provided for
-     * easier testing.  This constructor is explicitly autowired to avoid
-     * confusion when multiple constructors are present.
+     * Primary constructor used by Spring when the Razorpay gateway is active.
+     *
+     * @param keyId     Razorpay key ID from {@code razorpay.key-id} property
+     * @param keySecret Razorpay key secret from {@code razorpay.key-secret} property
+     * @param rest      shared {@link RestTemplate} bean for HTTP calls
+     * @throws IllegalStateException if {@code keyId} is blank
      */
     @org.springframework.beans.factory.annotation.Autowired
     public RazorpayGateway(
@@ -45,12 +67,31 @@ public class RazorpayGateway implements PaymentGateway {
         this.rest = rest != null ? rest : new RestTemplate();
     }
 
-    // convenience constructor for tests
-    // make non-public so Spring ignores it when performing autowiring
+    /**
+     * Convenience constructor for unit tests that do not require a shared
+     * {@link RestTemplate}.  Package-private to prevent Spring from
+     * considering it during autowiring.
+     *
+     * @param keyId     Razorpay key ID
+     * @param keySecret Razorpay key secret
+     */
     RazorpayGateway(String keyId, String keySecret) {
         this(keyId, keySecret, new RestTemplate());
     }
 
+    /**
+     * Creates a Razorpay order via {@code POST /v1/orders} and returns the
+     * gateway-assigned order ID (e.g. {@code order_xxx}).
+     *
+     * <p>The amount is converted to paise (smallest currency unit) before
+     * sending because the Razorpay API expects integer paise values.
+     *
+     * @param amount   payment amount in INR
+     * @param currency ISO currency code (e.g. {@code "INR"})
+     * @param receipt  internal payment UUID used as the Razorpay receipt
+     * @return the Razorpay order ID string
+     * @throws RuntimeException if the API call fails or the response is unparseable
+     */
     @Override
     public String initiate(double amount, String currency, String receipt) {
         Map<String, Object> req = new HashMap<>();
@@ -74,6 +115,17 @@ public class RazorpayGateway implements PaymentGateway {
         }
     }
 
+    /**
+     * Verifies a Razorpay webhook signature using HMAC-SHA256.
+     *
+     * <p>The expected signature is computed as:
+     * {@code HMAC_SHA256(keySecret, "<orderId>|<paymentId>")}.
+     *
+     * @param orderId   the Razorpay order ID
+     * @param paymentId the Razorpay payment ID
+     * @param signature the signature to verify
+     * @return {@code true} if the computed HMAC matches the provided signature
+     */
     @Override
     public boolean verify(String orderId, String paymentId, String signature) {
         String payload = orderId + "|" + paymentId;

@@ -5,34 +5,30 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
+/**
+ * Spring Boot entry point for the Product Service microservice.
+ *
+ * <p>Bootstraps the application context, enables JPA auditing for automatic
+ * {@code createdAt}/{@code updatedAt} population, and activates Spring's
+ * task scheduler for cron-driven jobs such as flash-deal expiration.</p>
+ *
+ * <p>Infrastructure dependencies (PostgreSQL, Redis, Kafka, Elasticsearch,
+ * Eureka) are configured via {@code application.properties} and the
+ * central Config Server.</p>
+ *
+ * @see org.springframework.boot.autoconfigure.SpringBootApplication
+ */
 @SpringBootApplication
 @EnableJpaAuditing
 @EnableScheduling
-/**
- * MAIN APPLICATION ENTRY POINT
- * 
- * This is the Spring Boot application entry point for this microservice.
- * Enables component scanning, sets up Spring contexts, and initializes all beans.
- */
 public class ProductServiceApplication {
 
- /**
-  * MAIN - Method Documentation
-  *
-  * PURPOSE:
-  * This method handles the main operation.
-  *
-  * PARAMETERS:
-  * @param args - String[] value
-  *
-  * RETURN VALUE:
-  * @return static void - Result of the operation
-  *
-  * ANNOTATIONS USED:
-  * @SpringBootApplication - Applied to this method
-  * @EnableJpaAuditing - Applied to this method
-  *
-  */
+	/**
+	 * JVM entry point. Launches the embedded Tomcat server and initialises
+	 * all Spring-managed beans.
+	 *
+	 * @param args command-line arguments forwarded to Spring Boot
+	 */
 	public static void main(String[] args) {
 		SpringApplication.run(ProductServiceApplication.class, args);
 	}

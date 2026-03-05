@@ -12,38 +12,39 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * REST Controller for shipment tracking and order status updates.
- * 
- * <p>Allows sellers and admins to add tracking events for orders,
- * and provides tracking history for buyers to follow their order progress.
- * 
- * <p>Tracking events include:
- * <ul>
- *   <li>Order status changes (SHIPPED, OUT_FOR_DELIVERY, DELIVERED)</li>
- *   <li>Location updates</li>
- *   <li>Carrier information and tracking numbers</li>
- *   <li>Estimated delivery updates</li>
- * </ul>
- * 
+ * REST controller for recording and querying shipment tracking events.
+ *
+ * <p>Sellers and admins append tracking events (location updates, carrier
+ * information, status changes) as an order progresses through the logistics
+ * pipeline. Buyers can then retrieve the full chronological tracking history
+ * to follow their order’s journey.</p>
+ *
+ * <p>Base path: {@code /api/order/tracking}</p>
+ *
  * @author Sourabh
  * @version 1.0
  * @since 2026-02-26
+ * @see ShipmentTrackingService
+ * @see com.sourabh.order_service.entity.ShipmentTracking
  */
 @RestController
 @RequestMapping("/api/order/tracking")
 @RequiredArgsConstructor
 public class ShipmentTrackingController {
 
+    /** Service encapsulating shipment tracking business logic. */
     private final ShipmentTrackingService trackingService;
 
     /**
-     * Adds a new tracking event for an order.
-     * 
-     * <p>Seller or admin can add events to update order location,
-     * carrier details, and status. Each event is timestamped.
-     * 
-     * @param request the tracking event details
-     * @return ResponseEntity with the created tracking event
+     * Appends a new tracking event to an order’s shipment history.
+     *
+     * <p>The event may include a status update, location, carrier name,
+     * tracking number, and a free-text description. Each event is timestamped
+     * at creation time.</p>
+     *
+     * @param request validated {@link TrackingEventRequest} payload
+     * @return {@link ResponseEntity} containing the persisted
+     *         {@link TrackingResponse}
      */
     @PostMapping
     @PreAuthorize("hasAnyRole('SELLER','ADMIN')")
@@ -52,13 +53,12 @@ public class ShipmentTrackingController {
     }
 
     /**
-     * Retrieves complete tracking history for an order.
-     * 
-     * <p>Returns all tracking events in chronological order,
-     * showing the complete journey of the order from creation to delivery.
-     * 
-     * @param orderUuid the UUID of the order
-     * @return ResponseEntity with list of tracking events
+     * Retrieves the complete tracking history for an order, sorted
+     * chronologically (oldest event first).
+     *
+     * @param orderUuid UUID of the order
+     * @return {@link ResponseEntity} containing a list of
+     *         {@link TrackingResponse} events
      */
     @GetMapping("/{orderUuid}")
     public ResponseEntity<List<TrackingResponse>> getHistory(@PathVariable String orderUuid) {

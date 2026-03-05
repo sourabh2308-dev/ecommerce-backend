@@ -11,6 +11,18 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/**
+ * Integration test that verifies the Product Service application context
+ * loads successfully with all required beans.
+ *
+ * <p>Uses Testcontainers to spin up a real PostgreSQL instance and mocks
+ * the Elasticsearch layer (repository + operations) since an ES container
+ * is not needed for basic context verification. Kafka auto-startup is
+ * disabled to avoid broker connectivity requirements during tests.</p>
+ *
+ * @see org.springframework.boot.test.context.SpringBootTest
+ * @see org.testcontainers.junit.jupiter.Testcontainers
+ */
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = {
@@ -22,16 +34,22 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 })
 class ProductServiceApplicationTests {
 
+    /** Testcontainers-managed PostgreSQL instance with auto-configured DataSource. */
     @Container
     @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15");
 
+    /** Mock Elasticsearch repository to avoid requiring an ES cluster. */
     @MockBean
     private ProductSearchRepository productSearchRepository;
 
+    /** Mock Elasticsearch operations bean. */
     @MockBean
     private ElasticsearchOperations elasticsearchOperations;
 
+    /**
+     * Smoke test: verifies the Spring application context starts without errors.
+     */
     @Test
     void contextLoads() {
     }

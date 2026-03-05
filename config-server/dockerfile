@@ -1,28 +1,43 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# DOCKERFILE FOR CONFIG-SERVER (Spring Cloud Config)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# Config Server Dockerfile — Spring Cloud Config
+# ============================================================================
 #
-# PURPOSE:
-# Centralized configuration management for all microservices.
-# Config Server stores application properties and serves them to services at startup.
+# The Config Server acts as a centralized configuration management hub for
+# every microservice in the platform. Instead of each service bundling its
+# own application.yml/properties, they all pull their configuration from
+# this server at startup (and can refresh it at runtime).
 #
-# WHY CONFIG-SERVER:
-# - Single source of truth for all service configurations
-# - Environment-specific configs (dev, staging, prod) without rebuilding images
-# - Dynamic property refresh without service restart
-# - Version control for configuration (Git-backed)
-# - Encryption for sensitive data (passwords, API keys)
+# Key responsibilities:
+#   - Serve as the single source of truth for configuration across services
+#   - Support environment-specific profiles (dev, staging, prod) without
+#     requiring image rebuilds
+#   - Allow runtime config refresh so services can pick up changes on the fly
+#   - Optionally back configuration with a Git repository for versioning
+#   - Encrypt sensitive values such as database passwords and API keys
 #
-# PORT: 8888 (standard Spring Cloud Config Server port)
-# ALL services connect to config-server before starting to fetch their properties.
+# This Dockerfile uses a multi-stage build:
+#   Stage 1 (builder) — compiles the config-server module with Maven
+#   Stage 2 (runtime) — runs the resulting JAR on a minimal JRE image
 #
-# ═══════════════════════════════════════════════════════════════════════════════
+# The standard Spring Cloud Config Server port is 8888. Every other
+# microservice must be able to reach http://config-server:8888 before it
+# can finish its own startup.
+# ============================================================================
 
-# ---- Build stage ----
+# --------------------------------------------------------------------------
+# Stage 1: Build
+# --------------------------------------------------------------------------
+# Start from a Maven + JDK 17 Alpine image so we can compile the project.
+# The "builder" alias lets us reference this stage later when copying
+# the compiled artifact into the runtime image.
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 WORKDIR /workspace
 
-# Copy POMs for multi-module Maven project
+# Copy all module POM files first, before any source code.
+# Docker caches each layer independently. Because POM files change far less
+# often than source code, putting them in their own layer means Maven's
+# dependency-download step (below) is cached and re-used on subsequent
+# builds — saving significant time when only source code has changed.
 COPY pom.xml .
 COPY api-gateway/pom.xml api-gateway/
 COPY auth-service/pom.xml auth-service/
@@ -34,23 +49,41 @@ COPY payment-service/pom.xml payment-service/
 COPY eureka-server/pom.xml eureka-server/
 COPY config-server/pom.xml config-server/
 
-# Download dependencies (cached layer)
+# Pre-download all dependencies declared in the config-server POM.
+# -pl config-server   → build only the config-server module
+# dependency:go-offline → fetch every dependency so later steps don't need network
+# -B                   → non-interactive (batch) mode
+# --no-transfer-progress → suppress noisy download progress logs
+# || true              → don't fail the build if optional deps can't be resolved
 RUN mvn -pl config-server dependency:go-offline -B --no-transfer-progress || true
 
-# Copy source code and build
+# Now copy the actual source code. This layer is invalidated whenever code
+# changes, but thanks to the layer ordering above, the expensive dependency
+# download is still cached.
 COPY config-server/src config-server/src
+
+# Compile and package the config-server module into a fat JAR.
+# -DskipTests skips unit tests to keep the image build fast; tests should
+# run in CI before the Docker build.
 RUN mvn -pl config-server package -DskipTests -B --no-transfer-progress
 
-# ---- Runtime stage ----
+# --------------------------------------------------------------------------
+# Stage 2: Runtime
+# --------------------------------------------------------------------------
+# Switch to a slim JRE-only Alpine image — no compiler, no Maven, no source
+# code. This dramatically reduces the final image size and attack surface.
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
-# Copy the built JAR file from build stage
+# Copy just the built JAR from the builder stage, discarding all build
+# tooling and intermediate files.
 COPY --from=builder /workspace/config-server/target/*.jar app.jar
 
-# Expose config-server port (8888 is Spring Cloud Config default)
+# Declare the port the Config Server listens on. Other services reference
+# this port when connecting to fetch their configuration.
 EXPOSE 8888
 
-# Start the Config Server
-# All services will connect to http://config-server:8888 to fetch their configs
+# Launch the Config Server. Using exec-form ENTRYPOINT ensures the Java
+# process runs as PID 1 and receives OS signals (SIGTERM, etc.) directly,
+# enabling graceful shutdown inside containers.
 ENTRYPOINT ["java", "-jar", "app.jar"]

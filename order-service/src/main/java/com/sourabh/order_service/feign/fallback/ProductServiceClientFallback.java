@@ -5,104 +5,51 @@ import com.sourabh.order_service.exception.OrderStateException;
 import com.sourabh.order_service.feign.ProductServiceClient;
 import org.springframework.stereotype.Component;
 
-@Component
 /**
- * FEIGN CLIENT - Declarative REST Client for Inter-Service Communication
- * 
- * PURPOSE:
- * Enables synchronous HTTP calls to other microservices in a declarative way.
- * Feign generates implementation at runtime from this interface definition.
- * 
- * HOW IT WORKS:
- * 1. @FeignClient registers this interface with Spring Cloud
- * 2. Service discovery (Eureka) resolves service name to actual host:port
- * 3. Load balancer (Ribbon) selects instance if multiple replicas exist
- * 4. Circuit breaker (Resilience4j) wraps calls for fault tolerance
- * 5. Method invocation triggers HTTP request with specified path/method
- * 
- * ANNOTATIONS:
- * @FeignClient(name = "service-name")
- *   - name: Matches spring.application.name of target service
- *   - Enables service discovery via Eureka
- * 
- * @GetMapping/@PostMapping/@PutMapping/@DeleteMapping
- *   - Maps to HTTP methods
- *   - Path combines with @FeignClient base path
- * 
- * @PathVariable/@RequestParam/@RequestBody
- *   - Maps method parameters to HTTP request parts
- * 
- * ERROR HANDLING:
- * Throws FeignException on HTTP errors (4xx, 5xx)
- * Caller must handle exceptions and implement compensation logic
- * 
- * EXAMPLE FLOW:
- * OrderService → ProductServiceClient.reduceStock()
- *   → HTTP POST product-service/api/product/internal/{uuid}/reduce-stock
- *   → Product stock updated in product_db
- *   → Response or FeignException returned
+ * Fallback implementation of {@link ProductServiceClient} that is activated
+ * when the product-service is unreachable or returns an error.
+ *
+ * <p>Every method throws an {@link OrderStateException} with a user-friendly
+ * message so that callers receive a clear indication that the downstream
+ * service is unavailable rather than an opaque Feign exception.</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ * @see ProductServiceClient
  */
+@Component
 public class ProductServiceClientFallback implements ProductServiceClient {
 
-    @Override
     /**
-     * GETPRODUCT - Method Documentation
+     * {@inheritDoc}
      *
-     * PURPOSE:
-     * This method handles the getProduct operation.
-     *
-     * PARAMETERS:
-     * @param uuid - String value
-     *
-     * RETURN VALUE:
-     * @return ProductDto - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @Override - Implements interface method
-     *
+     * @throws OrderStateException always — product-service is unavailable
      */
+    @Override
     public ProductDto getProduct(String uuid) {
         throw new OrderStateException("Product service is currently unavailable. Please try again later.");
     }
 
-    @Override
     /**
-     * REDUCESTOCK - Method Documentation
+     * {@inheritDoc}
      *
-     * PURPOSE:
-     * This method handles the reduceStock operation.
-     *
-     * PARAMETERS:
-     * @param uuid - String value
-     * @param quantity - int value
-     *
-     * ANNOTATIONS USED:
-     * @Override - Implements interface method
-     * @Override - Implements interface method
-     *
+     * @throws OrderStateException always — product-service is unavailable;
+     *         stock could not be reduced
      */
+    @Override
     public void reduceStock(String uuid, int quantity) {
         throw new OrderStateException("Product service is currently unavailable. Stock could not be reduced.");
     }
 
-    @Override
     /**
-     * RESTORESTOCK - Method Documentation
+     * {@inheritDoc}
      *
-     * PURPOSE:
-     * This method handles the restoreStock operation.
-     *
-     * PARAMETERS:
-     * @param uuid - String value
-     * @param quantity - int value
-     *
-     * ANNOTATIONS USED:
-     * @Override - Implements interface method
-     * @Override - Implements interface method
-     *
+     * @throws OrderStateException always — product-service is unavailable;
+     *         stock could not be restored
      */
+    @Override
     public void restoreStock(String uuid, int quantity) {
-        // Best-effort: log and continue. A real implementation would use an outbox/retry mechanism.
         throw new OrderStateException("Product service is currently unavailable. Stock could not be restored.");
     }
 }

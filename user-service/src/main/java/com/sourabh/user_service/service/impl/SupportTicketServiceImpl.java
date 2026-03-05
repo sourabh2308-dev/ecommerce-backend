@@ -18,14 +18,34 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Implementation of {@link SupportTicketService} for the customer-support ticketing system.
+ *
+ * <p>Manages the full ticket lifecycle from creation through resolution/closure.
+ * Each ticket may have an ordered list of {@link SupportMessage} entries that
+ * form a conversation between the customer and the assigned admin.</p>
+ *
+ * <p>Ticket status transitions are automated where possible:</p>
+ * <ul>
+ *   <li>Admin reply &rarr; {@code AWAITING_CUSTOMER}</li>
+ *   <li>Customer reply &rarr; {@code IN_PROGRESS}</li>
+ *   <li>Admin assigns themselves &rarr; {@code IN_PROGRESS}</li>
+ *   <li>Status set to {@code RESOLVED}/{@code CLOSED} &rarr; {@code resolvedAt} timestamp recorded</li>
+ * </ul>
+ *
+ * @see SupportTicketService
+ * @see SupportTicketRepository
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional
 @Slf4j
 public class SupportTicketServiceImpl implements SupportTicketService {
 
+    /** Repository for {@link SupportTicket} persistence operations. */
     private final SupportTicketRepository ticketRepository;
 
+    /** {@inheritDoc} */
     @Override
     public TicketResponse createTicket(CreateTicketRequest request, String userUuid) {
         SupportTicket ticket = SupportTicket.builder()
@@ -40,6 +60,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return mapToResponse(ticket);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public TicketResponse getTicket(String ticketUuid, String userUuid, String role) {
@@ -51,6 +72,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return mapToResponse(ticket);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<TicketResponse> getMyTickets(String userUuid, int page, int size) {
@@ -59,6 +81,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return toPageResponse(ticketPage);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<TicketResponse> getAllTickets(int page, int size) {
@@ -67,6 +90,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return toPageResponse(ticketPage);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<TicketResponse> getTicketsByStatus(TicketStatus status, int page, int size) {
@@ -75,6 +99,12 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return toPageResponse(ticketPage);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Auto-updates ticket status based on sender role:
+     * admin replies set {@code AWAITING_CUSTOMER}, customer replies set {@code IN_PROGRESS}.</p>
+     */
     @Override
     public TicketResponse sendMessage(String ticketUuid, String senderUuid, String senderRole, String content) {
         SupportTicket ticket = ticketRepository.findByUuid(ticketUuid)
@@ -92,7 +122,6 @@ public class SupportTicketServiceImpl implements SupportTicketService {
                 .build();
         ticket.getMessages().add(message);
 
-        // Auto-update status based on who's replying
         if ("ADMIN".equalsIgnoreCase(senderRole)) {
             ticket.setStatus(TicketStatus.AWAITING_CUSTOMER);
         } else {
@@ -104,6 +133,12 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return mapToResponse(ticket);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Sets {@code resolvedAt} timestamp when status becomes
+     * {@code RESOLVED} or {@code CLOSED}.</p>
+     */
     @Override
     public TicketResponse updateStatus(String ticketUuid, TicketStatus status, String adminUuid) {
         SupportTicket ticket = ticketRepository.findByUuid(ticketUuid)
@@ -117,6 +152,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return mapToResponse(ticket);
     }
 
+    /** {@inheritDoc} */
     @Override
     public TicketResponse assignTicket(String ticketUuid, String adminUuid) {
         SupportTicket ticket = ticketRepository.findByUuid(ticketUuid)
@@ -128,6 +164,13 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         return mapToResponse(ticket);
     }
 
+    /**
+     * Maps a {@link SupportTicket} entity (including its messages) to a
+     * {@link TicketResponse} DTO.
+     *
+     * @param ticket the ticket entity to convert
+     * @return the corresponding response DTO with embedded message list
+     */
     private TicketResponse mapToResponse(SupportTicket ticket) {
         List<MessageResponse> messages = ticket.getMessages() != null
                 ? ticket.getMessages().stream().map(m -> MessageResponse.builder()
@@ -154,6 +197,13 @@ public class SupportTicketServiceImpl implements SupportTicketService {
                 .build();
     }
 
+    /**
+     * Converts a Spring Data {@link Page} of {@link SupportTicket} entities
+     * into a generic {@link PageResponse} of {@link TicketResponse} DTOs.
+     *
+     * @param page the page of ticket entities
+     * @return the assembled page response
+     */
     private PageResponse<TicketResponse> toPageResponse(Page<SupportTicket> page) {
         return PageResponse.<TicketResponse>builder()
                 .content(page.getContent().stream().map(this::mapToResponse).toList())

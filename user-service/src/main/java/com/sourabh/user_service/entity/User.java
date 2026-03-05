@@ -6,6 +6,28 @@ import lombok.*;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * Core JPA entity representing a platform user account.
+ * <p>
+ * Supports three {@link Role roles}: {@code BUYER}, {@code SELLER},
+ * and {@code ADMIN}. The account progresses through several
+ * {@link UserStatus lifecycle states} — from initial registration
+ * and email verification through to full activation, and optionally
+ * blocking or soft-deletion by an administrator.
+ * </p>
+ *
+ * <p>Passwords are stored as BCrypt hashes. A public UUID is
+ * auto-generated on first persist via {@link #onCreateUser()} so
+ * that the database surrogate key is never leaked through the API.</p>
+ *
+ * <p>Mapped to the {@code users} table with unique constraints on
+ * {@code email} and {@code uuid}. Inherits audit timestamps from
+ * {@link BaseAuditEntity}.</p>
+ *
+ * @see Role
+ * @see UserStatus
+ * @see BaseAuditEntity
+ */
 @Entity
 @Table(name = "users",
         uniqueConstraints = {
@@ -20,166 +42,71 @@ import java.util.UUID;
 @Builder
 public class User extends BaseAuditEntity {
 
-    // ========================
-    // Identity
-    // ========================
-
+    /** Database surrogate primary key. */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
-    /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
-     */
-
-
+    /** Publicly-exposed unique identifier; generated in {@link #onCreateUser()}. */
     @Column(nullable = false, updatable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String uuid;
 
-    // ========================
-    // Personal Information
-    // ========================
-
+    /** User's first (given) name. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String firstName;
 
+    /** User's last (family) name. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String lastName;
 
+    /** User's email address — used as the login credential. Must be unique. */
     @Column(nullable = false, unique = true)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String email;
 
+    /** Optional phone number (max 15 characters, E.164 format recommended). */
     @Column(length = 15)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String phoneNumber;
 
-    // ========================
-    // Security
-    // ========================
-
+    /** BCrypt-hashed password. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String password;
 
+    /** Access-control role assigned to this user. */
     @Enumerated(EnumType.STRING)
-    // @Enumerated applied to field below
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private Role role;
 
+    /** Current lifecycle status of the account. */
     @Enumerated(EnumType.STRING)
-    // @Enumerated applied to field below
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private UserStatus status;
 
+    /** Whether the user has completed email OTP verification. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private boolean emailVerified;
 
+    /** Whether the seller account has been approved by an administrator. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    private boolean isApproved; // for seller approval
+    private boolean isApproved;
 
+    /** Soft-delete flag; {@code true} means the account is logically removed. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private boolean isDeleted;
 
+    /** Timestamp of the user's most recent successful login. */
     private LocalDateTime lastLoginAt;
 
-    // ========================
-    // Lifecycle Hook
-    // ========================
-
-    @PrePersist
     /**
-     * ONCREATEUSER - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the onCreateUser operation.
-     *
-     * ANNOTATIONS USED:
-     * @Column - Applied to this method
-     * @PrePersist - Applied to this method
-     *
+     * JPA lifecycle callback invoked before the entity is first persisted.
+     * <ul>
+     *   <li>Generates a random UUID.</li>
+     *   <li>Sets {@code emailVerified}, {@code isApproved}, and
+     *       {@code isDeleted} to {@code false}.</li>
+     *   <li>Defaults {@link #status} to
+     *       {@link UserStatus#PENDING_VERIFICATION} if not already set.</li>
+     * </ul>
      */
+    @PrePersist
     protected void onCreateUser() {
         this.uuid = UUID.randomUUID().toString();
         this.emailVerified = false;

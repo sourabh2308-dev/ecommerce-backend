@@ -37,223 +37,78 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * Production implementation of {@link ReviewService}.\n *
+ * <p>Manages the full lifecycle of product reviews: creation (with purchase
+ * verification), retrieval, update, soft-deletion, helpfulness voting, and
+ * image attachment. Cross-cutting concerns handled by this class include:
+ *
+ * <ul>
+ *   <li><strong>Order verification</strong> \u2014 synchronous Feign call to
+ *       order-service (with Resilience4j circuit breaker) to confirm that the
+ *       buyer has a delivered order containing the reviewed product.</li>
+ *   <li><strong>Kafka event publishing</strong> \u2014 a
+ *       {@link ReviewSubmittedEvent} is sent to the {@code review.submitted}
+ *       topic so that product-service can recalculate aggregate ratings.</li>
+ *   <li><strong>Redis caching</strong> \u2014 product review lists are cached;
+ *       {@code @CacheEvict} annotations invalidate the cache on mutations.</li>
+ *   <li><strong>Transactional integrity</strong> \u2014 all write operations
+ *       run inside a database transaction that rolls back on runtime
+ *       exceptions.</li>
+ * </ul>
+ *
+ * @see ReviewService
+ * @see com.sourabh.review_service.controller.ReviewController
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional
 @Slf4j
-/**
- * ═══════════════════════════════════════════════════════════════════════════
- * REVIEW SERVICE IMPLEMENTATION - Product Review & Rating Management
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Manages product reviews and ratings submitted by buyers after order delivery.
- * Validates review eligibility (buyer must have purchased the product), prevents
- * duplicate reviews, and publishes events for product rating recalculation.
- * 
- * KEY RESPONSIBILITIES:
- * --------------------
- * 1. Review Creation:
- *    - Validate buyer purchased the product (Feign call to order-service)
- *    - Prevent duplicate reviews for same product by same buyer
- *    - Validate rating (1-5 stars) and review text
- *    - Create Review entity with buyerUuid, productUuid, rating, comment
- * 
- * 2. Review Updates:
- *    - Allow buyers to edit their own reviews
- *    - Update rating or comment text
- *    - Publish review.updated event to recalculate product average rating
- * 
- * 3. Review Deletion:
- *    - Soft delete (isDeleted = true) to maintain audit trail
- *    - Only review owner can delete
- *    - Admins can delete any review (moderation)
- * 
- * 4. Review Retrieval:
- *    - Get all reviews for a product (paginated, sorted by date)
- *    - Get buyer's own reviews across all products
- *    - Filter by rating (e.g., show only 5-star reviews)
- * 
- * 5. Event-Driven Architecture:
- *    - Publishes review.submitted event to Kafka
- *    - product-service listens and recalculates average rating
- *    - Ensures eventual consistency for product ratings
- * 
- * ARCHITECTURE PATTERNS:
- * ----------------------
- * - Service Layer Pattern: Business logic separated from controller
- * - Microservice Collaboration: Feign calls to order-service for validation
- * - Event-Driven: Kafka events for async rating updates
- * - Cache-Aside: @Cacheable for product reviews list
- * - Soft Delete Pattern: isDeleted flag instead of physical deletion
- * 
- * ANNOTATIONS EXPLAINED:
- * ----------------------
- * @Service:
- *   - Marks as Spring-managed service bean
- *   - Eligible for dependency injection
- * 
- * @Transactional:
- *   - Wraps methods in database transaction
- *   - Rollback on RuntimeException
- *   - Ensures atomicity (e.g., save review + publish event)
- * 
- * @Cacheable("reviewsCache"):
- *   - Caches product reviews list
- *   - Key format: reviewsCache::productUuid
- *   - Reduces DB load for frequently viewed products
- *   - TTL configured in RedisCacheConfig
- * 
- * @CacheEvict:
- *   - Clears cache on review creation/update/delete
- *   - Ensures fresh data after modifications
- * 
- * BUSINESS RULES:
- * ---------------
- * 1. Review Eligibility:
- *    - Buyer must have ordered the product
- *    - Order must be delivered (status = DELIVERED)
- *    - One review per buyer per product (no duplicates)
- * 
- * 2. Rating Validation:
- *    - Rating must be between 1 and 5 (inclusive)
- *    - Star ratings: 1 (Poor), 2 (Fair), 3 (Good), 4 (Very Good), 5 (Excellent)
- * 
- * 3. Authorization:
- *    - Only review owner can update/delete their review
- *    - Admins can moderate (delete any review)
- * 
- * 4. Event Publishing:
- *    - review.submitted: Triggers product rating recalculation
- *    - review.updated: Re-triggers rating recalculation
- *    - product-service maintains aggregate rating (avg, count)
- * 
- * FEIGN CLIENT INTEGRATION:
- * --------------------------
- * OrderServiceClient.getOrderByUuid(orderUuid):
- *   - Called during review creation to validate eligibility
- *   - Returns OrderDto with buyer, product, status
- *   - Throws FeignException if order not found
- * 
- * Validation Logic:
- *   1. Check order exists
- *   2. Check order.buyerUuid == current user UUID
- *   3. Check order contains the product UUID
- *   4. Check order status = DELIVERED
- *   5. If all pass: Allow review creation
- * 
- * KAFKA EVENT SCHEMA:
- * -------------------
- * review.submitted Event:
- * {
- *   "reviewUuid": "rev-123",
- *   "productUuid": "prod-456",
- *   "buyerUuid": "buyer-789",
- *   "rating": 5,
- *   "comment": "Excellent product!",
- *   "createdAt": "2026-02-25T10:30:00"
- * }
- * 
- * product-service consumes this and:
- *   - Fetches all reviews for productUuid
- *   - Calculates average rating
- *   - Updates product.averageRating and product.reviewCount
- * 
- * ERROR HANDLING:
- * ---------------
- * - ReviewNotFoundException: Review UUID not found
- * - ReviewAlreadyExistsException: Duplicate review attempt
- * - ReviewException: Order not eligible (not delivered, not buyer's order)
- * - ReviewAccessException: User not authorized to update/delete
- * - FeignException: order-service unavailable (circuit breaker fallback)
- * 
- * CACHING STRATEGY:
- * -----------------
- * Cache Key: reviewsCache::{productUuid}
- * Cache Value: Page<ReviewResponse>
- * TTL: 15 minutes
- * 
- * Eviction Triggers:
- *   - createReview: Evict product reviews cache
- *   - updateReview: Evict product reviews cache
- *   - deleteReview: Evict product reviews cache
- * 
- * EXAMPLE FLOWS:
- * --------------
- * 
- * Flow 1: Create Review
- * createReview(request, buyerUuid)
- * → Validate rating (1-5)
- * → Call order-service: orderServiceClient.getOrderByUuid(request.orderUuid)
- * → Verify order.buyerUuid == buyerUuid
- * → Verify order contains productUuid
- * → Verify order.status == DELIVERED
- * → Check no existing review: reviewRepository.findByBuyerUuidAndProductUuid()
- * → If exists: throw ReviewAlreadyExistsException
- * → Create Review entity (buyerUuid, productUuid, rating, comment)
- * → Save to database
- * → Publish review.submitted event to Kafka
- * → Evict product reviews cache
- * → Convert to ReviewResponse
- * → Return ReviewResponse
- * 
- * Flow 2: Get Product Reviews (with caching)
- * getProductReviews(productUuid, page, size)
- * → Check cache: reviewsCache::{productUuid}
- * → If cache hit: Return cached Page<ReviewResponse>
- * → If cache miss:
- *    → Create Pageable (page, size, sort by createdAt DESC)
- *    → Query: reviewRepository.findByProductUuidAndIsDeletedFalse()
- *    → Convert Page<Review> to Page<ReviewResponse>
- *    → Store in cache (TTL = 15 min)
- *    → Return Page<ReviewResponse>
- * 
- * Flow 3: Update Review
- * updateReview(reviewUuid, request, buyerUuid)
- * → Fetch review by UUID (throw ReviewNotFoundException if not found)
- * → Verify review.buyerUuid == buyerUuid (throw ReviewAccessException if not)
- * → Update rating (if provided in request)
- * → Update comment (if provided in request)
- * → Set updatedAt = now
- * → Save review
- * → Publish review.updated event to Kafka
- * → Evict product reviews cache
- * → Convert to ReviewResponse
- * → Return ReviewResponse
- * 
- * TESTING NOTES:
- * --------------
- * - Mock OrderServiceClient to simulate order validation
- * - Test eligibility rules: non-delivered order, wrong buyer, duplicate review
- * - Verify Kafka event publishing with EmbeddedKafka
- * - Test cache eviction after create/update/delete
- * - Verify authorization: buyer can't edit others' reviews
- * @Transactional ensures database operations are atomic.
- * @Cacheable/@CacheEvict optimize frequent queries.
- */
 public class ReviewServiceImpl implements ReviewService {
 
+    /** JPA repository for {@link Review} entities. */
     private final ReviewRepository reviewRepository;
+
+    /** JPA repository for {@link ReviewImage} entities. */
     private final ReviewImageRepository reviewImageRepository;
+
+    /** JPA repository for {@link ReviewVote} entities. */
     private final ReviewVoteRepository reviewVoteRepository;
+
+    /** Feign client used to fetch order details from order-service. */
     private final OrderServiceClient orderServiceClient;
+
+    /** Kafka producer for publishing review domain events. */
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
+    /** Kafka topic name for newly submitted reviews. */
     private static final String TOPIC_REVIEW_SUBMITTED = "review.submitted";
 
-    // ─────────────────────────────────────────────────
-    // CREATE REVIEW
-    // ─────────────────────────────────────────────────
-
+    /**
+     * Creates a new product review after performing purchase verification.
+     *
+     * <p>Validation steps performed before persisting:
+     * <ol>
+     *   <li>Fetch the order from order-service via Feign.</li>
+     *   <li>Verify the order belongs to the requesting buyer.</li>
+     *   <li>Verify the order status is {@code DELIVERED}.</li>
+     *   <li>Verify the product UUID appears in the order line items.</li>
+     *   <li>Verify no existing review by this buyer for this product.</li>
+     * </ol>
+     *
+     * On success the review is saved, and a {@link ReviewSubmittedEvent} is
+     * published to Kafka so that product-service can recalculate the
+     * product's aggregate rating.
+     *
+     * @param request   validated review creation payload
+     * @param buyerUuid UUID of the authenticated buyer
+     * @return the newly created review as a {@link ReviewResponse}
+     * @throws ReviewAccessException       if the order does not belong to the buyer
+     * @throws ReviewException             if the order is not delivered or the product is not in the order
+     * @throws ReviewAlreadyExistsException if the buyer has already reviewed this product
+     */
     @Override
     @CacheEvict(value = "reviews", key = "#request.productUuid")
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public ReviewResponse createReview(CreateReviewRequest request, String buyerUuid) {
 
         OrderDto order = fetchOrder(request.getOrderUuid());
@@ -301,18 +156,19 @@ public class ReviewServiceImpl implements ReviewService {
         return mapToResponse(review);
     }
 
-    // ─────────────────────────────────────────────────
-    // GET REVIEWS BY PRODUCT (paginated)
-    // ─────────────────────────────────────────────────
-
+    /**
+     * Returns a paginated list of non-deleted reviews for a product,
+     * sorted by {@code createdAt} descending (newest first).
+     *
+     * <p>This is a read-only operation; no cache eviction is performed.
+     *
+     * @param productUuid UUID of the product
+     * @param page        zero-based page index
+     * @param size        maximum items per page
+     * @return paginated {@link ReviewResponse} list
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public PageResponse<ReviewResponse> getReviewsByProduct(String productUuid, int page, int size) {
         log.debug("Fetching reviews for productUuid={}, page={}", productUuid, page);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -320,36 +176,37 @@ public class ReviewServiceImpl implements ReviewService {
         return toPageResponse(reviewPage);
     }
 
-    // ─────────────────────────────────────────────────
-    // GET REVIEW BY UUID
-    // ─────────────────────────────────────────────────
-
+    /**
+     * Retrieves a single non-deleted review by its UUID.
+     *
+     * @param reviewUuid the unique identifier of the review
+     * @return the matching {@link ReviewResponse}
+     * @throws ReviewNotFoundException if no non-deleted review exists
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public ReviewResponse getReviewByUuid(String reviewUuid) {
         Review review = reviewRepository.findByUuidAndIsDeletedFalse(reviewUuid)
                 .orElseThrow(() -> new ReviewNotFoundException("Review not found: " + reviewUuid));
         return mapToResponse(review);
     }
 
-    // ─────────────────────────────────────────────────
-    // UPDATE REVIEW (comment only)
-    // ─────────────────────────────────────────────────
-
+    /**
+     * Updates the comment of an existing review.
+     *
+     * <p>Only the original buyer (review author) may update the review.
+     * The rating is immutable after creation. Evicts all entries in the
+     * {@code reviews} cache to ensure consumers see fresh data.
+     *
+     * @param reviewUuid UUID of the review to update
+     * @param request    payload containing the new comment text
+     * @param buyerUuid  UUID of the authenticated buyer
+     * @return the updated {@link ReviewResponse}
+     * @throws ReviewNotFoundException if the review does not exist
+     * @throws ReviewAccessException   if the caller is not the author
+     */
     @Override
     @CacheEvict(value = "reviews", allEntries = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public ReviewResponse updateReview(String reviewUuid, UpdateReviewRequest request, String buyerUuid) {
         Review review = reviewRepository.findByUuidAndIsDeletedFalse(reviewUuid)
                 .orElseThrow(() -> new ReviewNotFoundException("Review not found: " + reviewUuid));
@@ -367,18 +224,22 @@ public class ReviewServiceImpl implements ReviewService {
         return mapToResponse(review);
     }
 
-    // ─────────────────────────────────────────────────
-    // DELETE REVIEW
-    // ─────────────────────────────────────────────────
-
+    /**
+     * Soft-deletes a review by setting {@code isDeleted = true}.
+     *
+     * <p>Buyers may only delete their own reviews. Users with the
+     * {@code ADMIN} role may delete any review for moderation purposes.
+     * Evicts all entries in the {@code reviews} cache.
+     *
+     * @param reviewUuid UUID of the review to delete
+     * @param role       the caller's role ({@code BUYER} or {@code ADMIN})
+     * @param buyerUuid  UUID of the authenticated user
+     * @return a confirmation message
+     * @throws ReviewNotFoundException if the review does not exist
+     * @throws ReviewAccessException   if a non-admin tries to delete another's review
+     */
     @Override
     @CacheEvict(value = "reviews", allEntries = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public String deleteReview(String reviewUuid, String role, String buyerUuid) {
         Review review = reviewRepository.findByUuidAndIsDeletedFalse(reviewUuid)
                 .orElseThrow(() -> new ReviewNotFoundException("Review not found: " + reviewUuid));
@@ -394,40 +255,32 @@ public class ReviewServiceImpl implements ReviewService {
         return "Review deleted successfully";
     }
 
-    // ─────────────────────────────────────────────────
-    // GET MY REVIEWS (buyer's own reviews, paginated)
-    // ─────────────────────────────────────────────────
-
+    /**
+     * Returns a paginated list of reviews authored by the specified buyer,
+     * sorted by {@code createdAt} descending.
+     *
+     * @param buyerUuid UUID of the buyer
+     * @param page      zero-based page index
+     * @param size      maximum items per page
+     * @return paginated {@link ReviewResponse} list
+     */
     @Override
     @Transactional(readOnly = true)
-    /**
-     * SERVICE METHOD - Business Logic Implementation
-     * 
-     * Implements business logic with validation, persistence, and external calls.
-     * Wrapped in @Transactional for atomic execution.
-     */
     public PageResponse<ReviewResponse> getMyReviews(String buyerUuid, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<Review> reviewPage = reviewRepository.findByBuyerUuidAndIsDeletedFalse(buyerUuid, pageable);
         return toPageResponse(reviewPage);
     }
 
-    // ─────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────
-
     /**
-     * FETCHORDER - Method Documentation
+     * Fetches an order from order-service via the Feign client.
      *
-     * PURPOSE:
-     * This method handles the fetchOrder operation.
+     * <p>Translates a Feign {@code 404 Not Found} response into a
+     * domain-specific {@link ReviewException} with a descriptive message.
      *
-     * PARAMETERS:
-     * @param orderUuid - String value
-     *
-     * RETURN VALUE:
-     * @return OrderDto - Result of the operation
-     *
+     * @param orderUuid the UUID of the order to retrieve
+     * @return the {@link OrderDto} returned by order-service
+     * @throws ReviewException if the order is not found (404)
      */
     private OrderDto fetchOrder(String orderUuid) {
         try {
@@ -438,17 +291,11 @@ public class ReviewServiceImpl implements ReviewService {
     }
 
     /**
-     * TOPAGERESPONSE - Method Documentation
+     * Converts a Spring Data {@link Page} of {@link Review} entities into
+     * a {@link PageResponse} of {@link ReviewResponse} DTOs.
      *
-     * PURPOSE:
-     * This method handles the toPageResponse operation.
-     *
-     * PARAMETERS:
-     * @param page - Page<Review> value
-     *
-     * RETURN VALUE:
-     * @return PageResponse<ReviewResponse> - Result of the operation
-     *
+     * @param page the JPA page result
+     * @return the equivalent {@link PageResponse} for the API layer
      */
     private PageResponse<ReviewResponse> toPageResponse(Page<Review> page) {
         List<ReviewResponse> content = page.getContent().stream()
@@ -465,17 +312,14 @@ public class ReviewServiceImpl implements ReviewService {
     }
 
     /**
-     * MAPTORESPONSE - Method Documentation
+     * Maps a {@link Review} entity to a {@link ReviewResponse} DTO.
      *
-     * PURPOSE:
-     * This method handles the mapToResponse operation.
+     * <p>Includes computed fields: image URLs extracted from the review's
+     * {@link ReviewImage} collection, and helpful / not-helpful vote
+     * counts queried from {@link ReviewVoteRepository}.
      *
-     * PARAMETERS:
-     * @param review - Review value
-     *
-     * RETURN VALUE:
-     * @return ReviewResponse - Result of the operation
-     *
+     * @param review the JPA entity to map
+     * @return the corresponding API response DTO
      */
     private ReviewResponse mapToResponse(Review review) {
         List<String> imageUrls = review.getImages() != null
@@ -500,8 +344,18 @@ public class ReviewServiceImpl implements ReviewService {
                 .build();
     }
 
-    // ── Vote on review helpfulness ──
-
+    /**
+     * Records or updates a helpfulness vote on a review.
+     *
+     * <p>If the voter has already voted on the review the existing vote is
+     * toggled to the new value; otherwise a new {@link ReviewVote} entity
+     * is created.
+     *
+     * @param reviewUuid UUID of the review being voted on
+     * @param voterUuid  UUID of the authenticated voter
+     * @param helpful    {@code true} for helpful, {@code false} for not helpful
+     * @throws ReviewNotFoundException if the review does not exist
+     */
     public void voteReview(String reviewUuid, String voterUuid, boolean helpful) {
         Review review = reviewRepository.findByUuidAndIsDeletedFalse(reviewUuid)
                 .orElseThrow(() -> new ReviewNotFoundException("Review not found: " + reviewUuid));
@@ -521,8 +375,20 @@ public class ReviewServiceImpl implements ReviewService {
         log.info("Vote recorded: reviewUuid={}, voterUuid={}, helpful={}", reviewUuid, voterUuid, helpful);
     }
 
-    // ── Add image to review ──
-
+    /**
+     * Attaches an image URL to the buyer's own review.
+     *
+     * <p>Enforces a maximum of five images per review. Only the review's
+     * author may add images; other users receive a
+     * {@link ReviewAccessException}.
+     *
+     * @param reviewUuid UUID of the review to attach the image to
+     * @param buyerUuid  UUID of the authenticated buyer
+     * @param imageUrl   publicly accessible URL of the image
+     * @throws ReviewNotFoundException if the review does not exist
+     * @throws ReviewAccessException   if the caller is not the review's author
+     * @throws ReviewException         if the 5-image limit is exceeded
+     */
     public void addImageToReview(String reviewUuid, String buyerUuid, String imageUrl) {
         Review review = reviewRepository.findByUuidAndIsDeletedFalse(reviewUuid)
                 .orElseThrow(() -> new ReviewNotFoundException("Review not found: " + reviewUuid));

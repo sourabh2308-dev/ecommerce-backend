@@ -9,388 +9,121 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 
-// Data Repository - Provides database access via Spring Data JPA
+/**
+ * Spring Data JPA repository for {@link PaymentSplit} entities.
+ *
+ * <p>Provides standard CRUD operations along with a rich set of
+ * aggregation queries used by the seller dashboard and the admin
+ * dashboard.  All {@code @Query} methods use JPQL and operate on
+ * entity field names rather than raw column names, keeping the
+ * repository database-agnostic.
+ *
+ * <h3>Key query categories</h3>
+ * <ul>
+ *   <li><strong>Seller-scoped</strong> — filter by {@code sellerUuid}
+ *       and aggregate completed/pending payouts and order counts.</li>
+ *   <li><strong>Platform-wide</strong> — aggregate gross revenue,
+ *       platform fees, delivery fees, seller payouts, order counts
+ *       and active seller counts across all completed splits.</li>
+ * </ul>
+ */
 public interface PaymentSplitRepository extends JpaRepository<PaymentSplit, Long> {
 
+    /**
+     * Returns all splits belonging to a specific payment.
+     *
+     * @param paymentUuid the parent payment UUID
+     * @return list of splits (may be empty)
+     */
     List<PaymentSplit> findByPaymentUuid(String paymentUuid);
 
+    /**
+     * Returns a paginated list of splits for a given seller.
+     *
+     * @param sellerUuid the seller UUID
+     * @param pageable   pagination and sort parameters
+     * @return a page of payment splits
+     */
     Page<PaymentSplit> findBySellerUuid(String sellerUuid, Pageable pageable);
 
-    /** Total seller payout (completed splits only) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Sums the seller payout for all <em>completed</em> splits belonging
+     * to the specified seller.  Returns {@code 0} when no rows match.
+     *
+     * @param sellerUuid the seller UUID
+     * @return total completed payout amount
      */
-
     @Query("SELECT COALESCE(SUM(ps.sellerPayout), 0) FROM PaymentSplit ps WHERE ps.sellerUuid = :sellerUuid AND ps.status = 'COMPLETED'")
     Double sumSellerPayout(@Param("sellerUuid") String sellerUuid);
 
-    /** Total seller payout that is still pending */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Sums the seller payout for all <em>pending</em> splits belonging
+     * to the specified seller.  Returns {@code 0} when no rows match.
+     *
+     * @param sellerUuid the seller UUID
+     * @return total pending payout amount
      */
-
     @Query("SELECT COALESCE(SUM(ps.sellerPayout), 0) FROM PaymentSplit ps WHERE ps.sellerUuid = :sellerUuid AND ps.status = 'PENDING'")
     Double sumSellerPendingPayout(@Param("sellerUuid") String sellerUuid);
 
-    /** Count of orders for a seller (distinct order UUIDs) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Counts distinct order UUIDs across a seller's completed splits,
+     * giving the total number of orders the seller has fulfilled.
+     *
+     * @param sellerUuid the seller UUID
+     * @return number of completed orders
      */
-
     @Query("SELECT COUNT(DISTINCT ps.orderUuid) FROM PaymentSplit ps WHERE ps.sellerUuid = :sellerUuid AND ps.status = 'COMPLETED'")
     Long countSellerOrders(@Param("sellerUuid") String sellerUuid);
 
-    /** Total platform fees collected (all completed splits) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Platform-wide sum of platform fees across all completed splits.
+     *
+     * @return total platform fee revenue
      */
-
     @Query("SELECT COALESCE(SUM(ps.platformFee), 0) FROM PaymentSplit ps WHERE ps.status = 'COMPLETED'")
     Double sumTotalPlatformFees();
 
-    /** Total delivery fees collected (all completed splits) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Platform-wide sum of delivery fees across all completed splits.
+     *
+     * @return total delivery fee revenue
      */
-
     @Query("SELECT COALESCE(SUM(ps.deliveryFee), 0) FROM PaymentSplit ps WHERE ps.status = 'COMPLETED'")
     Double sumTotalDeliveryFees();
 
-    /** Total seller payouts (all completed splits) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Platform-wide sum of seller payouts across all completed splits.
+     *
+     * @return total amount paid out to sellers
      */
-
     @Query("SELECT COALESCE(SUM(ps.sellerPayout), 0) FROM PaymentSplit ps WHERE ps.status = 'COMPLETED'")
     Double sumTotalSellerPayouts();
 
-    /** Total item amounts (gross revenue, all completed splits) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Platform-wide sum of item amounts (gross revenue) across all
+     * completed splits.
+     *
+     * @return total gross item revenue
      */
-
     @Query("SELECT COALESCE(SUM(ps.itemAmount), 0) FROM PaymentSplit ps WHERE ps.status = 'COMPLETED'")
     Double sumTotalItemAmount();
 
-    /** Count total completed orders (distinct) */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Counts the total number of distinct completed orders across the
+     * entire platform.
+     *
+     * @return number of completed orders
      */
-
     @Query("SELECT COUNT(DISTINCT ps.orderUuid) FROM PaymentSplit ps WHERE ps.status = 'COMPLETED'")
     Long countTotalCompletedOrders();
 
-    /** Count total unique sellers with completed splits */
     /**
-
-     * CUSTOM DATABASE QUERY
-
-     * 
-
-     * This method executes a custom JPQL or native SQL query against the database.
-
-     * 
-
-     * @Query annotation allows writing complex queries beyond Spring Data naming conventions.
-
-     * - JPQL queries use entity names and field names (database-independent)
-
-     * - Native queries use actual table/column names (database-specific SQL)
-
-     * - :paramName binds method parameters to query
-
-     * - ?1, ?2 for positional parameters
-
-     * 
-
-     * WHY CUSTOM QUERY:
-
-     * - Complex joins across multiple tables
-
-     * - Aggregations (COUNT, SUM, AVG, GROUP BY)
-
-     * - Subqueries or conditional logic
-
-     * - Performance optimization (specific columns, indexes)
-
-     * 
-
-     * Spring Data auto-implements this method at runtime.
-
+     * Counts the total number of unique sellers that have at least one
+     * completed split, indicating active participation on the platform.
+     *
+     * @return number of active sellers
      */
-
     @Query("SELECT COUNT(DISTINCT ps.sellerUuid) FROM PaymentSplit ps WHERE ps.status = 'COMPLETED'")
     Long countActiveSellers();
 }

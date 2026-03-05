@@ -5,32 +5,25 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * UPDATE PROFILE REQUEST DTO
- * 
- * Data Transfer Object for user profile update requests.
- * Contains fields that users can modify in their profile.
- * 
- * VALIDATION:
- * - All fields are optional (user can update selectively)
- * - @Size constraints ensure reasonable lengths
- * - Validated by @Valid annotation in controller
+ * Request payload for updating a user's profile information.
+ *
+ * <p>All fields are optional &mdash; clients may send only the fields
+ * they wish to change. {@code null} fields are ignored by the service
+ * layer during the update.</p>
  */
 @Getter
 @Setter
 public class UpdateProfileRequest {
 
-    // First name: 1-50 characters
-    // @Size validates minimum and maximum length
+    /** Updated first name (1–50 characters). */
     @Size(min = 1, max = 50, message = "First name must be between 1 and 50 characters")
     private String firstName;
 
-    // Last name: 1-50 characters
-    // @Size validates minimum and maximum length
+    /** Updated last name (1–50 characters). */
     @Size(min = 1, max = 50, message = "Last name must be between 1 and 50 characters")
     private String lastName;
 
-    // Phone number: up to 15 characters (international format)
-    // @Size validates maximum length
+    /** Updated phone number (max 15 characters, international format). */
     @Size(max = 15, message = "Phone number must not exceed 15 characters")
     private String phoneNumber;
 }

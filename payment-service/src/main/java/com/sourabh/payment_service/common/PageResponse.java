@@ -5,50 +5,46 @@ import lombok.Getter;
 
 import java.util.List;
 
+/**
+ * Generic wrapper for paginated query results.
+ *
+ * <p>Every list endpoint in the payment service returns its collection
+ * inside a {@code PageResponse} so that clients receive both the current
+ * page of data and the metadata required to render pagination controls.
+ *
+ * <p><b>Example JSON:</b>
+ * <pre>{@code
+ * {
+ *   "content":       [ { ... }, { ... } ],
+ *   "page":          0,
+ *   "size":          10,
+ *   "totalElements": 47,
+ *   "totalPages":    5,
+ *   "last":          false
+ * }
+ * }</pre>
+ *
+ * @param <T> the element type carried in {@link #content}
+ */
 @Getter
 @Builder
-/**
- * DATA TRANSFER OBJECT (DTO) - Server Response Format
- * 
- * Defines the JSON structure returned to HTTP clients.
- * Built from Entity objects via mapper methods.
- * May include computed fields not in database.
- */
-/**
- * PAGE RESPONSE DTO - Paginated Results Container
- * 
- * PURPOSE:
- * Wraps paginated list results with metadata about pagination.
- * Used by all list endpoints that support pagination.
- * 
- * FIELDS:
- * - content: List of items (orders, products, users, etc.)
- * - page: Current page number (0-indexed)
- * - size: Items per page
- * - totalElements: Total count across all pages
- * - totalPages: Total number of pages
- * - last: Boolean indicating if this is the last page
- * 
- * EXAMPLE JSON:
- * {
- *   "content": [{...}, {...}, {...}],
- *   "page": 0,
- *   "size": 10,
- *   "totalElements": 47,
- *   "totalPages": 5,
- *   "last": false
- * }
- * 
- * CLIENT USAGE:
- * - Display items from "content" array
- * - Show page indicator: "Page 1 of 5"
- * - Enable/disable next/prev buttons based on "last" and "page"
- */
 public class PageResponse<T> {
+
+    /** Items belonging to the current page. */
     private List<T> content;
+
+    /** Zero-based page index. */
     private int page;
+
+    /** Requested page size (number of items per page). */
     private int size;
+
+    /** Total number of matching items across all pages. */
     private long totalElements;
+
+    /** Total number of pages. */
     private int totalPages;
+
+    /** {@code true} when this is the final page of results. */
     private boolean last;
 }

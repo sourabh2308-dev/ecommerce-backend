@@ -16,66 +16,15 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * ══════════════════════════════════════════════════════════════════════════════
- * COUPON SERVICE IMPLEMENTATION
- * ══════════════════════════════════════════════════════════════════════════════
- * 
- * PURPOSE:
- * --------
- * Manages coupon creation, validation, tracking, and lifecycle in the order system.
- * This service orchestrates:
- *   1. Coupon creation with validation (duplicate code prevention)
- *   2. Coupon validation against order amount and business rules
- *   3. Coupon usage tracking per user and globally
- *   4. Automatic discount calculation (percentage or fixed amount)
- *   5. Coupon deactivation and lifecycle management
- * 
- * KEY RESPONSIBILITIES:
- * ---------------------
- * - Create coupons with discount types (PERCENTAGE, FIXED_AMOUNT)
- * - Validate coupon applicability (expiry, usage limits, minimum order amount)
- * - Calculate appropriate discount amounts with maximum cap enforcement
- * - Track usage per user to enforce per-user limits
- * - Maintain global usage count for total limit enforcement
- * - Deactivate expired or exhausted coupons
- * 
- * COUPON TYPES:
- * ─────────────
- * PERCENTAGE: Discount applied as percentage of order amount, capped by maxDiscount
- * FIXED_AMOUNT: Discount applied as fixed amount regardless of order value
- * 
- * VALIDATION RULES:
- * ─────────────────
- * - Code uniqueness: Prevent duplicate coupon codes in system
- * - Validity window: Current time must be between validFrom and validUntil
- * - Global limit: Used count must not exceed totalUsageLimit
- * - Per-user limit: User usage count must not exceed perUserLimit
- * - Minimum order: Order amount must be >= minOrderAmount
- * 
- * BUSINESS LOGIC:
- * ───────────────
- * When validating a coupon, the service checks all constraints in order:
- * 1. Coupon exists and is active
- * 2. Current time is within validity period
- * 3. Global usage limit not reached
- * 4. User has not exceeded personal usage limit
- * 5. Order amount meets minimum threshold
- * 6. Calculate discount (respecting max cap for percentage discounts)
- * 
- * DEPENDENCIES:
- * ──────────────
- * - CouponRepository: JPA repository for coupon entities (CRUD operations)
- * - CouponUsageRepository: JPA repository for tracking per-user coupon usage
- * 
- * ANNOTATIONS:
- * ─────────────
- * @Service: Marks class as Spring service layer component (business logic)
- * @RequiredArgsConstructor: Lombok generates constructor for final fields
- * @Transactional: Default transactional behavior for create/update operations
- * @Transactional(readOnly = true): Optimizes database access for query-only methods
- * 
- * ══════════════════════════════════════════════════════════════════════════════
- * 
+ * Implementation of {@link CouponService} that manages the complete coupon lifecycle.
+ *
+ * <p>Handles coupon creation (with duplicate-code prevention), multi-rule validation,
+ * discount calculation (percentage with optional cap, or fixed amount), per-user and
+ * global usage tracking, and coupon deactivation.</p>
+ *
+ * <p>All write operations are transactional; read-only queries use
+ * {@code @Transactional(readOnly = true)} for connection-pool optimisation.</p>
+ *
  * @author Sourabh
  * @version 1.0
  * @since 2026-02-26
@@ -84,47 +33,21 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CouponServiceImpl implements CouponService {
 
+    /** Repository for {@link Coupon} entity persistence. */
     private final CouponRepository couponRepository;
+
+    /** Repository for recording and querying per-user coupon redemptions. */
     private final CouponUsageRepository couponUsageRepository;
 
     /**
-     * Create a new coupon with discount configuration.
-     * 
-     * PURPOSE:
-     * Creates a new coupon and stores it in the database after validating
-     * that the coupon code is not already in use.
-     * 
-     * PROCESS:
-     * 1. Check if coupon code already exists (case-insensitive)
-     * 2. Throw exception if code is duplicate (prevent conflicts)
-     * 3. Normalize code to uppercase for consistency
-     * 4. Build coupon entity with all configuration parameters
-     * 5. Set defaults for optional fields (minOrderAmount: 0, totalUsageLimit: 1000, etc.)
-     * 6. Save to database and return response
-     * 
-     * DISCOUNT CALCULATION:
-     * - PERCENTAGE: Applies percentage discount, capped by maxDiscount if set
-     * - FIXED_AMOUNT: Applies fixed discount amount regardless of order total
-     * 
-     * VALIDATION:
-     * - Code must be unique (case-insensitive comparison)
-     * - discountType must be valid enum value (PERCENTAGE or FIXED_AMOUNT)
-     * - validFrom must be before validUntil for validity window
-     * 
-     * @param request CreateCouponRequest containing coupon configuration:
-     *        - code: Unique coupon code to use at checkout
-     *        - discountType: Either "PERCENTAGE" or "FIXED_AMOUNT"
-     *        - discountValue: Percentage (0-100) or fixed amount
-     *        - minOrderAmount: Minimum order amount to apply coupon (optional, default: 0)
-     *        - maxDiscount: Maximum discount cap for percentage coupons (optional)
-     *        - totalUsageLimit: Total times coupon can be used globally (optional, default: 1000)
-     *        - perUserLimit: Maximum times one user can use coupon (optional, default: 1)
-     *        - validFrom: Coupon start validity date
-     *        - validUntil: Coupon end validity date
-     *        - sellerUuid: UUID of seller creating coupon
-     * 
-     * @return CouponResponse with created coupon details
-     * @throws IllegalArgumentException if coupon code already exists
+     * {@inheritDoc}
+     *
+     * <p>Normalises the code to uppercase, checks for duplicates, applies sensible
+     * defaults for optional limits, and persists the new coupon.</p>
+     *
+     * @param request coupon creation payload
+     * @return response DTO with the persisted coupon details
+     * @throws IllegalArgumentException if a coupon with the same code already exists
      */
     @Override
     @Transactional
@@ -148,39 +71,17 @@ public class CouponServiceImpl implements CouponService {
     }
 
     /**
-     * Validate if a coupon can be applied to an order and calculate discount.
-     * 
-     * PURPOSE:
-     * Performs comprehensive validation of a coupon against business rules
-     * and calculates the discount amount if coupon is applicable.
-     * 
-     * VALIDATION SEQUENCE:
-     * 1. Coupon exists and is active in database
-     * 2. Current time is within validity period (validFrom to validUntil)
-     * 3. Global usage limit not exceeded (usedCount < totalUsageLimit)
-     * 4. User has not exhausted personal usage limit
-     * 5. Order amount meets minimum threshold (orderAmount >= minOrderAmount)
-     * 6. Calculate discount with appropriate cap
-     * 
-     * DISCOUNT CALCULATION:
-     * - PERCENTAGE: (orderAmount * discountValue / 100), capped by maxDiscount
-     * - FIXED_AMOUNT: discountValue applied directly
-     * - Result rounded to 2 decimal places for currency precision
-     * 
-     * RESPONSE HANDLING:
-     * - If any validation fails: Returns CouponValidationResponse with valid=false and reason
-     * - If all validations pass: Returns valid=true with calculated discount and final amount
-     * - finalAmount = max(0, orderAmount - discountAmount) to prevent negative totals
-     * 
-     * @param code Coupon code to validate (converted to uppercase)
-     * @param orderAmount Total order amount before discount
-     * @param buyerUuid UUID of buyer attempting to use coupon (tracks per-user usage)
-     * 
-     * @return CouponValidationResponse containing:
-     *         - valid: true if coupon can be applied, false otherwise
-     *         - message: Reason if invalid (e.g., "Coupon expired", "You have already used this coupon")
-     *         - discountAmount: Calculated discount if valid (null if invalid)
-     *         - finalAmount: Order total after discount if valid (null if invalid)
+     * {@inheritDoc}
+     *
+     * <p>Sequentially checks: active status, validity window, global usage limit,
+     * per-user usage limit, and minimum order amount. On success the discount is
+     * calculated (percentage capped by {@code maxDiscount}, or fixed amount) and
+     * rounded to two decimal places.</p>
+     *
+     * @param code        coupon code (case-insensitive)
+     * @param orderAmount order total before discount
+     * @param buyerUuid   buyer attempting to redeem
+     * @return validation result with discount and final amount, or failure reason
      */
     @Override
     @Transactional(readOnly = true)
@@ -217,28 +118,16 @@ public class CouponServiceImpl implements CouponService {
     }
 
     /**
-     * Record coupon usage when order is successfully created.
-     * 
-     * PURPOSE:
-     * Atomically updates coupon usage tracking after order placement.
-     * Increments global usage counter and creates usage record for audit trail.
-     * 
-     * PROCESS:
-     * 1. Fetch coupon by code (throws exception if not found/inactive)
-     * 2. Increment global usedCount by 1
-     * 3. Save updated coupon to database
-     * 4. Create CouponUsage record linking coupon, buyer, and order
-     * 5. Persist usage record for tracking and audit purposes
-     * 
-     * TRANSACTION SAFETY:
-     * @Transactional ensures both coupon update and usage record creation
-     * are atomic (both succeed or both rollback on failure).
-     * 
-     * @param code Coupon code that was applied to order
-     * @param buyerUuid UUID of buyer who used the coupon
-     * @param orderUuid UUID of order in which coupon was applied
-     * 
-     * @throws RuntimeException if coupon not found or inactive
+     * {@inheritDoc}
+     *
+     * <p>Atomically increments the coupon’s global {@code usedCount} and
+     * creates a {@link CouponUsage} audit record linking coupon, buyer, and order.
+     * Both operations participate in the same transaction.</p>
+     *
+     * @param code      coupon code applied to the order
+     * @param buyerUuid UUID of the buyer
+     * @param orderUuid UUID of the order
+     * @throws RuntimeException if coupon is not found or inactive
      */
     @Override
     @Transactional
@@ -256,27 +145,13 @@ public class CouponServiceImpl implements CouponService {
     }
 
     /**
-     * Deactivate an active coupon to prevent further usage.
-     * 
-     * PURPOSE:
-     * Marks a coupon as inactive to permanently disable it without deletion.
-     * Maintains coupon records for audit trail and historical tracking.
-     * 
-     * PROCESS:
-     * 1. Fetch coupon by code (must be active)
-     * 2. Set isActive flag to false
-     * 3. Save updated coupon to database
-     * 4. Return confirmation message
-     * 
-     * USAGE SCENARIOS:
-     * - Expired coupons past validUntil date
-     * - Coupons with exhausted usage limits
-     * - Admin-driven coupon cancellation
-     * - Seasonal or promotional coupon closure
-     * 
-     * @param code Coupon code to deactivate
-     * 
-     * @return Confirmation message "Coupon deactivated"
+     * {@inheritDoc}
+     *
+     * <p>Sets the coupon’s {@code isActive} flag to {@code false} without deleting
+     * the record, preserving it for historical and audit purposes.</p>
+     *
+     * @param code coupon code to deactivate
+     * @return confirmation string
      * @throws RuntimeException if coupon not found or already inactive
      */
     @Override
@@ -290,13 +165,12 @@ public class CouponServiceImpl implements CouponService {
     }
 
     /**
-     * Retrieve all coupons in the system converts to response DTOs.
-     * 
-     * PURPOSE:
-     * Provides list of all coupons for administrative purposes (view, manage, analytics).
-     * Useful for seller dashboards and admin panels.
-     * 
-     * @return List of CouponResponse containing all coupons with their configurations
+     * {@inheritDoc}
+     *
+     * <p>Fetches all coupons (active and inactive) and maps each to a
+     * {@link CouponResponse} for administrative display.</p>
+     *
+     * @return list of all coupon response DTOs
      */
     @Override
     @Transactional(readOnly = true)
@@ -304,6 +178,16 @@ public class CouponServiceImpl implements CouponService {
         return couponRepository.findAll().stream().map(this::mapToResponse).toList();
     }
 
+    /**
+     * Computes the discount amount for the given coupon and order total.
+     *
+     * <p>For {@code PERCENTAGE} coupons the result is capped by {@code maxDiscount}
+     * when present. The value is rounded to two decimal places.</p>
+     *
+     * @param coupon      the coupon entity containing discount configuration
+     * @param orderAmount the order total used as the basis for percentage discounts
+     * @return calculated discount amount
+     */
     private double calculateDiscount(Coupon coupon, double orderAmount) {
         double discount;
         if (coupon.getDiscountType() == Coupon.DiscountType.PERCENTAGE) {
@@ -317,6 +201,12 @@ public class CouponServiceImpl implements CouponService {
         return Math.round(discount * 100.0) / 100.0;
     }
 
+    /**
+     * Maps a {@link Coupon} entity to a {@link CouponResponse} DTO.
+     *
+     * @param c the coupon entity to convert
+     * @return populated response DTO
+     */
     private CouponResponse mapToResponse(Coupon c) {
         return CouponResponse.builder()
                 .code(c.getCode())

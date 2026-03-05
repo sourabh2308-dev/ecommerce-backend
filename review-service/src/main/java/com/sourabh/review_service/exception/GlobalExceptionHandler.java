@@ -12,145 +12,87 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Centralised exception handler for the review-service.
+ *
+ * <p>Intercepts all exceptions thrown from controller methods and converts
+ * them into a uniform {@link ErrorResponse} JSON structure. This prevents
+ * internal stack traces from leaking to API consumers and ensures a
+ * consistent error contract across every endpoint.
+ *
+ * <h3>Exception &rarr; HTTP status mapping</h3>
+ * <table>
+ *   <tr><th>Exception</th><th>HTTP status</th><th>Error code</th></tr>
+ *   <tr><td>{@link ReviewException}</td><td>400</td><td>REVIEW_ERROR</td></tr>
+ *   <tr><td>{@link ReviewAlreadyExistsException}</td><td>409</td><td>REVIEW_ALREADY_EXISTS</td></tr>
+ *   <tr><td>{@link ReviewAccessException}</td><td>403</td><td>REVIEW_ACCESS_DENIED</td></tr>
+ *   <tr><td>{@link ReviewNotFoundException}</td><td>404</td><td>REVIEW_NOT_FOUND</td></tr>
+ *   <tr><td>{@link MethodArgumentNotValidException}</td><td>400</td><td>VALIDATION_ERROR</td></tr>
+ *   <tr><td>{@link Exception} (catch-all)</td><td>500</td><td>INTERNAL_SERVER_ERROR</td></tr>
+ * </table>
+ *
+ * @see ErrorResponse
+ */
 @Slf4j
 @RestControllerAdvice
-/**
- * GLOBAL EXCEPTION HANDLER - Centralized Error Response Generator
- * 
- * PURPOSE:
- * Intercepts all exceptions thrown in the application and converts them
- * to standardized JSON error responses. Prevents stack traces from leaking
- * to clients and ensures consistent error format across all endpoints.
- * 
- * ARCHITECTURE:
- * @RestControllerAdvice: Spring AOP that intercepts controller exceptions
- * @ExceptionHandler: Maps specific exception types to handler methods
- * 
- * ERROR RESPONSE FORMAT:
- * {
- *   "timestamp": "2026-02-25T10:30:00",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- * 
- * EXCEPTION MAPPING:
- * - Custom exceptions (NotFoundException, etc.) → Specific HTTP codes
- * - MethodArgumentNotValidException → 400 with validation details
- * - Generic Exception → 500 INTERNAL SERVER ERROR
- * 
- * LOGGING:
- * All exceptions logged at ERROR level for debugging and monitoring.
- * Stack traces captured for server-side analysis.
- */
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(ReviewException.class)
     /**
-     * HANDLEREVIEWEXCEPTION - Method Documentation
+     * Handles generic review business-rule violations.
      *
-     * PURPOSE:
-     * This method handles the handleReviewException operation.
-     *
-     * PARAMETERS:
-     * @param ex - ReviewException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught {@link ReviewException}
+     * @return {@code 400 Bad Request} response with error details
      */
+    @ExceptionHandler(ReviewException.class)
     public ResponseEntity<ErrorResponse> handleReviewException(ReviewException ex) {
         return buildError("REVIEW_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(ReviewAlreadyExistsException.class)
     /**
-     * HANDLEDUPLICATE - Method Documentation
+     * Handles duplicate-review attempts (one review per buyer per product).
      *
-     * PURPOSE:
-     * This method handles the handleDuplicate operation.
-     *
-     * PARAMETERS:
-     * @param ex - ReviewAlreadyExistsException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught {@link ReviewAlreadyExistsException}
+     * @return {@code 409 Conflict} response with error details
      */
+    @ExceptionHandler(ReviewAlreadyExistsException.class)
     public ResponseEntity<ErrorResponse> handleDuplicate(ReviewAlreadyExistsException ex) {
         return buildError("REVIEW_ALREADY_EXISTS", ex.getMessage(), HttpStatus.CONFLICT);
     }
 
-    @ExceptionHandler(ReviewAccessException.class)
     /**
-     * HANDLEACCESS - Method Documentation
+     * Handles unauthorised access to review resources.
      *
-     * PURPOSE:
-     * This method handles the handleAccess operation.
-     *
-     * PARAMETERS:
-     * @param ex - ReviewAccessException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught {@link ReviewAccessException}
+     * @return {@code 403 Forbidden} response with error details
      */
+    @ExceptionHandler(ReviewAccessException.class)
     public ResponseEntity<ErrorResponse> handleAccess(ReviewAccessException ex) {
         return buildError("REVIEW_ACCESS_DENIED", ex.getMessage(), HttpStatus.FORBIDDEN);
     }
 
-    @ExceptionHandler(ReviewNotFoundException.class)
     /**
-     * HANDLENOTFOUND - Method Documentation
+     * Handles review-not-found lookups.
      *
-     * PURPOSE:
-     * This method handles the handleNotFound operation.
-     *
-     * PARAMETERS:
-     * @param ex - ReviewNotFoundException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught {@link ReviewNotFoundException}
+     * @return {@code 404 Not Found} response with error details
      */
+    @ExceptionHandler(ReviewNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(ReviewNotFoundException ex) {
         return buildError("REVIEW_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * HANDLEVALIDATION - Method Documentation
+     * Handles Jakarta Bean Validation failures triggered by {@code @Valid}
+     * on controller method parameters.
      *
-     * PURPOSE:
-     * This method handles the handleValidation operation.
+     * <p>Collects all field-level errors and returns them in the
+     * {@link ErrorResponse#getDetails()} list (e.g.&nbsp;{@code "rating :
+     * must be at least 1"}).
      *
-     * PARAMETERS:
-     * @param ex - MethodArgumentNotValidException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught {@link MethodArgumentNotValidException}
+     * @return {@code 400 Bad Request} response with per-field error details
      */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<String> errors = ex.getBindingResult()
                 .getAllErrors()
@@ -168,45 +110,28 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(Exception.class)
     /**
-     * HANDLEGENERAL - Method Documentation
+     * Catch-all handler for any unexpected exception not matched by the
+     * more specific handlers above. Logs the full stack trace at
+     * {@code ERROR} level for server-side debugging.
      *
-     * PURPOSE:
-     * This method handles the handleGeneral operation.
-     *
-     * PARAMETERS:
-     * @param ex - Exception value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught {@link Exception}
+     * @return {@code 500 Internal Server Error} response with a generic message
      */
+    @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneral(Exception ex) {
         log.error("Unhandled exception", ex);
         return buildError("INTERNAL_SERVER_ERROR", "Something went wrong", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     /**
-     * BUILDERROR - Method Documentation
+     * Builds a standardised {@link ErrorResponse} wrapped in a
+     * {@link ResponseEntity} with the specified HTTP status.
      *
-     * PURPOSE:
-     * This method handles the buildError operation.
-     *
-     * PARAMETERS:
-     * @param code - String value
-     * @param message - String value
-     * @param status - HttpStatus value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param code    machine-readable error code (e.g.&nbsp;{@code REVIEW_NOT_FOUND})
+     * @param message human-readable description of the error
+     * @param status  the HTTP status to return
+     * @return the fully constructed {@link ResponseEntity}
      */
     private ResponseEntity<ErrorResponse> buildError(String code, String message, HttpStatus status) {
         return new ResponseEntity<>(

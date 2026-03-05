@@ -1,47 +1,45 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# MULTI-STAGE DOCKERFILE FOR PAYMENT-SERVICE MICROSERVICE
+# DOCKERFILE — Payment Service (Multi-Stage Build)
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# PURPOSE:
-# Creates optimized Docker image for payment-service using multi-stage build pattern.
-# Separates build environment from runtime environment to minimize final image size.
+# Builds an optimised Docker image for the payment-service microservice using a
+# two-stage approach:
 #
-# STAGES:
-# 1. Builder Stage: Compiles Java source code and packages JAR file
-# 2. Runtime Stage: Runs the application with minimal dependencies
+#   Stage 1 (builder) — Maven + JDK 17 on Alpine
+#     • Resolves dependencies (cached layer)
+#     • Compiles Java source and packages the Spring Boot fat JAR
 #
-# BENEFITS:
-# - Smaller image size (only JRE + JAR, no Maven or source code)
-# - Faster deployment (less data to transfer)
-# - Better security (no build tools in production image)
-# - Layer caching (dependencies cached separately from source)
+#   Stage 2 (runtime) — JRE 17 on Alpine
+#     • Copies only the fat JAR from the builder stage
+#     • Runs the application with the minimal JRE footprint
+#
+# Image size is reduced from ~500 MB (builder) to ~150 MB (runtime) because
+# Maven, the JDK toolchain, and all intermediate artefacts are discarded.
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: BUILD STAGE
-# ─────────────────────────────────────────────────────────────────────────────
-# Base image: Maven 3.9 with Eclipse Temurin JDK 17 on Alpine Linux
-# AS builder: Names this stage for reference in later COPY --from=builder
-# Alpine: Minimal Linux distro (~5MB base, vs ~100MB for Ubuntu)
+# ---------------------------------------------------------------------------
+# STAGE 1 — BUILD
+# ---------------------------------------------------------------------------
+# Maven 3.9 with Eclipse Temurin JDK 17 on Alpine Linux provides a complete
+# build toolchain in a lightweight base image.
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 
-# Set working directory for all subsequent commands in this stage
-# All files will be copied/created here: /workspace
+# All subsequent commands operate relative to /workspace.
 WORKDIR /workspace
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DEPENDENCY RESOLUTION (Cached Layer)
-# ─────────────────────────────────────────────────────────────────────────────
-# WHY: Copy pom.xml files first to leverage Docker layer caching.
-# If pom.xml doesn't change, Maven won't re-download dependencies on rebuild.
-# This dramatically speeds up builds during development.
+# ---------------------------------------------------------------------------
+# Dependency resolution (cached layer)
+# ---------------------------------------------------------------------------
+# Copying POM files first allows Docker to cache the expensive
+# dependency-download step.  As long as the POMs do not change, rebuilds
+# skip this layer entirely.
 
-# Copy root pom.xml (parent POM with dependency management)
+# Parent POM with shared dependency-management definitions
 COPY pom.xml .
 
-# Copy all module pom.xml files (multi-module Maven project structure)
-# Even though we only build payment-service, Maven needs all POMs to resolve the reactor
+# Sibling module POMs required by the Maven reactor even though only
+# payment-service is built here.
 COPY api-gateway/pom.xml api-gateway/
 COPY auth-service/pom.xml auth-service/
 COPY user-service/pom.xml user-service/
@@ -52,80 +50,36 @@ COPY payment-service/pom.xml payment-service/
 COPY eureka-server/pom.xml eureka-server/
 COPY config-server/pom.xml config-server/
 
-# Download all dependencies for payment-service module
-# -pl payment-service: Build only this module
-# dependency:go-offline: Downloads dependencies to local .m2 repository
-# -B: Batch mode (non-interactive, cleaner logs)
-# --no-transfer-progress: Suppresses download progress (cleaner logs in CI/CD)
-# || true: Don't fail build if some deps unavailable (optional deps)
+# Download dependencies into the local Maven cache.  The '|| true' guard
+# prevents a build failure when optional dependencies are unavailable.
 RUN mvn -pl payment-service dependency:go-offline -B --no-transfer-progress || true
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SOURCE CODE COMPILATION
-# ─────────────────────────────────────────────────────────────────────────────
-# Copy source code (done AFTER dependency download for better caching)
-# If source changes but dependencies don't, previous RUN layer is reused
+# ---------------------------------------------------------------------------
+# Source compilation
+# ---------------------------------------------------------------------------
+# Source code is copied AFTER the dependency layer so that code-only changes
+# do not invalidate the cached dependency download.
 COPY payment-service/src payment-service/src
 
-# Compile and package the application
-# -pl payment-service: Build this module only
-# package: Executes compile -> test -> package lifecycle phases
-# -DskipTests: Skips unit tests (faster build, tests run separately in CI/CD)
-# -B --no-transfer-progress: Same flags as above for clean output
-# Output: payment-service/target/payment-service-0.0.1-SNAPSHOT.jar (or similar)
+# Compile, run annotation processors, and package the Spring Boot fat JAR.
+# Tests are skipped here; they run in a dedicated CI step.
 RUN mvn -pl payment-service package -DskipTests -B --no-transfer-progress
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: RUNTIME STAGE
-# ─────────────────────────────────────────────────────────────────────────────
-# Base image: Eclipse Temurin JRE 17 on Alpine Linux
-# JRE-only (not JDK): Smaller image, only runtime components (no javac compiler)
-# Temurin: OpenJDK distribution from Adoptium (free, production-ready)
-# Alpine: Minimal Linux (~40MB runtime vs ~200MB for Debian-based images)
+# ---------------------------------------------------------------------------
+# STAGE 2 — RUNTIME
+# ---------------------------------------------------------------------------
+# Eclipse Temurin JRE 17 on Alpine provides the smallest viable Java runtime.
 FROM eclipse-temurin:17-jre-alpine
 
-# Set working directory in runtime container
 WORKDIR /app
 
-# ─────────────────────────────────────────────────────────────────────────────
-# COPY APPLICATION JAR
-# ─────────────────────────────────────────────────────────────────────────────
-# --from=builder: Copy from build stage (not from host filesystem)
-# /workspace/payment-service/target/*.jar: Maven output JAR file
-# app.jar: Rename to generic name for consistent ENTRYPOINT
-# This is the ONLY file needed from build stage (source code discarded)
+# Copy the fat JAR produced by Stage 1.  The glob pattern picks up the
+# versioned artefact regardless of the version string in pom.xml.
 COPY --from=builder /workspace/payment-service/target/*.jar app.jar
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EXPOSE PORT
-# ─────────────────────────────────────────────────────────────────────────────
-# Documents that the container listens on port 8080
-# Does NOT actually publish the port (that's done with -p in docker run or docker-compose)
-# This is metadata for documentation and tools like docker ps
+# Document the port the Spring Boot application listens on.
 EXPOSE 8080
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONTAINER STARTUP COMMAND
-# ─────────────────────────────────────────────────────────────────────────────
-# ENTRYPOINT: Command that executes when container starts
-# ["java", "-jar", "app.jar"]: Exec form (preferred over shell form)
-# Exec form: Runs command directly without shell wrapper (PID 1 = Java process)
-# Benefits: Proper signal handling (SIGTERM for graceful shutdown), faster startup
-#
-# JVM will read environment variables configured in docker-compose.yml:
-#   - spring.datasource.url (PostgreSQL connection)
-#   - spring.kafka.bootstrap-servers (Kafka connection)
-#   - eureka.client.service-url (Service discovery)
-#   - JWT secrets, Redis config, etc.
+# Start the application using exec form so that the JVM receives OS signals
+# (SIGTERM) directly, enabling graceful shutdown.
 ENTRYPOINT ["java", "-jar", "app.jar"]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# IMAGE SIZE OPTIMIZATION RESULTS:
-# ─────────────────────────────────────────────────────────────────────────────
-# Multi-stage build reduces image size:
-# - Builder stage (discarded): ~500MB (Maven + JDK + dependencies + source)
-# - Runtime stage (kept): ~150MB (JRE + JAR only)
-# - Alternative (single-stage): ~500MB
-# Savings: ~350MB per service (with 6 services = ~2GB saved)
-#
-# ─────────────────────────────────────────────────────────────────────────────

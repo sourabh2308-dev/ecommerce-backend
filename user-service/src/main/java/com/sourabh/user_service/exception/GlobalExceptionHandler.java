@@ -11,145 +11,82 @@ import org.springframework.validation.FieldError;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Centralised exception handler for the user-service.
+ *
+ * <p>Uses {@link RestControllerAdvice} to intercept all exceptions thrown by
+ * controllers and convert them into a uniform {@link ErrorResponse} JSON
+ * structure. This prevents raw stack traces from leaking to API consumers
+ * and guarantees a consistent error format across every endpoint.</p>
+ *
+ * <h3>Exception &rarr; HTTP status mapping</h3>
+ * <table>
+ *   <tr><th>Exception</th><th>HTTP Status</th><th>Error Code</th></tr>
+ *   <tr><td>{@link UserAlreadyExistsException}</td><td>409 Conflict</td><td>USER_ALREADY_EXISTS</td></tr>
+ *   <tr><td>{@link UserNotFoundException}</td><td>404 Not Found</td><td>USER_NOT_FOUND</td></tr>
+ *   <tr><td>{@link OTPException}</td><td>400 Bad Request</td><td>OTP_ERROR</td></tr>
+ *   <tr><td>{@link UserStateException}</td><td>409 Conflict</td><td>USER_STATE_ERROR</td></tr>
+ *   <tr><td>{@link MethodArgumentNotValidException}</td><td>400 Bad Request</td><td>VALIDATION_ERROR</td></tr>
+ *   <tr><td>{@link Exception} (catch-all)</td><td>500 Internal Server Error</td><td>INTERNAL_SERVER_ERROR</td></tr>
+ * </table>
+ */
 @Slf4j
 @RestControllerAdvice
-/**
- * GLOBAL EXCEPTION HANDLER - Centralized Error Response Generator
- * 
- * PURPOSE:
- * Intercepts all exceptions thrown in the application and converts them
- * to standardized JSON error responses. Prevents stack traces from leaking
- * to clients and ensures consistent error format across all endpoints.
- * 
- * ARCHITECTURE:
- * @RestControllerAdvice: Spring AOP that intercepts controller exceptions
- * @ExceptionHandler: Maps specific exception types to handler methods
- * 
- * ERROR RESPONSE FORMAT:
- * {
- *   "timestamp": "2026-02-25T10:30:00",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- * 
- * EXCEPTION MAPPING:
- * - Custom exceptions (NotFoundException, etc.) → Specific HTTP codes
- * - MethodArgumentNotValidException → 400 with validation details
- * - Generic Exception → 500 INTERNAL SERVER ERROR
- * 
- * LOGGING:
- * All exceptions logged at ERROR level for debugging and monitoring.
- * Stack traces captured for server-side analysis.
- */
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(UserAlreadyExistsException.class)
     /**
-     * HANDLEUSEREXISTS - Method Documentation
+     * Handles duplicate-user registration attempts.
      *
-     * PURPOSE:
-     * This method handles the handleUserExists operation.
-     *
-     * PARAMETERS:
-     * @param ex - UserAlreadyExistsException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught exception
+     * @return HTTP 409 response with error details
      */
+    @ExceptionHandler(UserAlreadyExistsException.class)
     public ResponseEntity<ErrorResponse> handleUserExists(UserAlreadyExistsException ex) {
         return buildError("USER_ALREADY_EXISTS", ex.getMessage(), HttpStatus.CONFLICT);
     }
 
-    @ExceptionHandler(UserNotFoundException.class)
     /**
-     * HANDLEUSERNOTFOUND - Method Documentation
+     * Handles requests for users that do not exist.
      *
-     * PURPOSE:
-     * This method handles the handleUserNotFound operation.
-     *
-     * PARAMETERS:
-     * @param ex - UserNotFoundException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught exception
+     * @return HTTP 404 response with error details
      */
+    @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleUserNotFound(UserNotFoundException ex) {
         return buildError("USER_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(OTPException.class)
     /**
-     * HANDLEOTPEXCEPTION - Method Documentation
+     * Handles OTP verification failures (wrong code, expired, rate-limited).
      *
-     * PURPOSE:
-     * This method handles the handleOTPException operation.
-     *
-     * PARAMETERS:
-     * @param ex - OTPException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught exception
+     * @return HTTP 400 response with error details
      */
+    @ExceptionHandler(OTPException.class)
     public ResponseEntity<ErrorResponse> handleOTPException(OTPException ex) {
         return buildError("OTP_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(UserStateException.class)
     /**
-     * HANDLEUSERSTATE - Method Documentation
+     * Handles operations that conflict with the user's current state.
      *
-     * PURPOSE:
-     * This method handles the handleUserState operation.
-     *
-     * PARAMETERS:
-     * @param ex - UserStateException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the caught exception
+     * @return HTTP 409 response with error details
      */
+    @ExceptionHandler(UserStateException.class)
     public ResponseEntity<ErrorResponse> handleUserState(UserStateException ex) {
         return buildError("USER_STATE_ERROR", ex.getMessage(), HttpStatus.CONFLICT);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * HANDLEVALIDATIONEXCEPTION - Method Documentation
+     * Handles bean-validation failures triggered by {@code @Valid} on
+     * request DTOs. Each field error is collected into the {@code details}
+     * list of the response.
      *
-     * PURPOSE:
-     * This method handles the handleValidationException operation.
-     *
-     * PARAMETERS:
-     * @param ex - MethodArgumentNotValidException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the validation exception containing binding results
+     * @return HTTP 400 response with per-field error descriptions
      */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException ex) {
 
         List<String> errors = ex.getBindingResult()
@@ -168,23 +105,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(Exception.class)
     /**
-     * HANDLEGENERALEXCEPTION - Method Documentation
+     * Catch-all handler for any unexpected exception not covered by the
+     * more specific handlers above. Logs the full stack trace at ERROR level
+     * for server-side debugging.
      *
-     * PURPOSE:
-     * This method handles the handleGeneralException operation.
-     *
-     * PARAMETERS:
-     * @param ex - Exception value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the unhandled exception
+     * @return HTTP 500 response with a generic error message
      */
+    @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex) {
         log.error("Unhandled exception in user-service", ex);
         return buildError("INTERNAL_SERVER_ERROR",
@@ -192,6 +121,15 @@ public class GlobalExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
+    /**
+     * Helper that builds a standardised {@link ErrorResponse} wrapped in a
+     * {@link ResponseEntity} with the given HTTP status.
+     *
+     * @param code    application-specific error code
+     * @param message human-readable error description
+     * @param status  the HTTP status to return
+     * @return the fully constructed response entity
+     */
     private ResponseEntity<ErrorResponse> buildError(
             String code,
             String message,

@@ -12,42 +12,67 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 
 /**
- * Gateway-level security filters applied to every forwarded request.
+ * Configuration class that registers a {@link GlobalFilter} responsible for
+ * securing and enriching every request forwarded through the API Gateway.
  *
- * Order of operations (single filter, single mutate call):
- *  1. Strip any client-supplied X-User-* headers (prevent header spoofing).
- *  2. If a valid Bearer token is present, extract JWT claims and inject
- *     X-User-UUID, X-User-Role, X-User-Email so downstream services know
- *     who the caller is without ever touching a JWT themselves.
- *  3. Inject X-Internal-Secret so downstream services can reject requests
- *     that bypass the gateway entirely.
+ * <h3>Processing Steps (executed in a single filter, single request mutation)</h3>
+ * <ol>
+ *   <li><strong>Strip spoofable headers</strong> &mdash; removes any
+ *       client-supplied {@code X-User-UUID}, {@code X-User-Role}, and
+ *       {@code X-User-Email} headers to prevent identity spoofing.</li>
+ *   <li><strong>Inject validated identity from JWT</strong> &mdash; if a
+ *       valid {@code Authorization: Bearer &lt;token&gt;} header is present,
+ *       the token is parsed and the extracted claims (UUID, role, email) are
+ *       injected as {@code X-User-*} headers. Downstream services therefore
+ *       never need to parse JWTs themselves.</li>
+ *   <li><strong>Inject internal secret</strong> &mdash; the configured
+ *       {@code X-Internal-Secret} header is attached so downstream services
+ *       can verify that the request originated from the gateway rather than
+ *       from a direct external call.</li>
+ * </ol>
+ *
+ * <p>This filter is ordered at {@code Integer.MIN_VALUE} to ensure it runs
+ * before any route-level or security filters.</p>
+ *
+ * @see JwtUtil
+ * @see SecurityConfig
  */
 @Slf4j
-// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @RequiredArgsConstructor
 public class InternalSecretFilterConfig {
 
+    /** Utility used to validate JWT tokens and extract claims. */
     private final JwtUtil jwtUtil;
 
+    /** Shared secret injected into every forwarded request so downstream
+     *  services can reject traffic that bypasses the gateway. */
     @Value("${internal.secret}")
     private String internalSecret;
 
+    /**
+     * Creates a {@link GlobalFilter} bean that strips, injects, and secures
+     * request headers on every exchange passing through the gateway.
+     *
+     * <p>The filter performs three operations in a single request mutation:
+     * header stripping, JWT claim injection, and internal-secret injection
+     * (see class-level documentation for details).</p>
+     *
+     * @return a {@link GlobalFilter} that secures forwarded request headers
+     */
     @Bean
-    @Order(Integer.MIN_VALUE) // Run before any route-level filter
+    @Order(Integer.MIN_VALUE)
     public GlobalFilter securityHeadersFilter() {
         return (exchange, chain) -> {
 
             ServerHttpRequest.Builder mutated = exchange.getRequest().mutate();
 
-            // ── Step 1: Strip spoofable identity headers from the incoming client request ──
             mutated.headers(h -> {
                 h.remove("X-User-UUID");
                 h.remove("X-User-Role");
                 h.remove("X-User-Email");
             });
 
-            // ── Step 2: Inject validated identity from JWT (if present) ──
             String authHeader = exchange.getRequest()
                     .getHeaders()
                     .getFirst(HttpHeaders.AUTHORIZATION);
@@ -65,13 +90,10 @@ public class InternalSecretFilterConfig {
                     if (email != null) mutated.header("X-User-Email", email);
 
                 } catch (Exception e) {
-                    // JWT is invalid — SecurityConfig will have already rejected
-                    // authenticated routes. For public routes we just skip headers.
                     log.debug("Could not extract JWT claims for header injection: {}", e.getMessage());
                 }
             }
 
-            // ── Step 3: Inject internal secret so downstream services reject direct access ──
             mutated.header("X-Internal-Secret", internalSecret);
 
             return chain.filter(

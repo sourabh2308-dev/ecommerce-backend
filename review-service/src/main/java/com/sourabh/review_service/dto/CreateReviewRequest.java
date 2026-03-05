@@ -7,62 +7,58 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Request DTO for creating a new product review.
+ *
+ * <p>Submitted by a buyer via {@code POST /api/review}. Jakarta Bean Validation
+ * constraints are enforced automatically when the controller parameter is
+ * annotated with {@code @Valid}; violations result in a {@code 400 Bad Request}
+ * response produced by
+ * {@link com.sourabh.review_service.exception.GlobalExceptionHandler}.
+ *
+ * <h3>Example JSON</h3>
+ * <pre>{@code
+ * {
+ *   "orderUuid"   : "ord-abc123",
+ *   "productUuid" : "prod-xyz789",
+ *   "rating"      : 5,
+ *   "comment"     : "Excellent quality!"
+ * }
+ * }</pre>
+ *
+ * @see com.sourabh.review_service.controller.ReviewController#createReview
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class CreateReviewRequest {
 
     /**
-
-
-     * VALIDATION: This field is required and cannot be blank.
-
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-
+     * UUID of the order that contains the purchased product.
+     * Used to verify that the buyer actually purchased the item
+     * (order must have status {@code DELIVERED}).
      */
-
-
     @NotBlank(message = "Order UUID is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String orderUuid;
 
+    /**
+     * UUID of the product being reviewed.
+     * Must match one of the items inside the referenced order.
+     */
     @NotBlank(message = "Product UUID is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String productUuid;
 
+    /**
+     * Star rating between 1 (poor) and 5 (excellent), inclusive.
+     * Must not be {@code null}.
+     */
     @NotNull(message = "Rating is required")
-    // Validation constraint
-    // @NotNull - Validates input before processing
     @Min(value = 1, message = "Rating must be at least 1")
-    // Validation constraint
-    // @Min - Validates input before processing
     @Max(value = 5, message = "Rating must not exceed 5")
-    // Validation constraint
-    // @Max - Validates input before processing
-    // Validation constraint
-    // @Max - Validates input before processing
     private Integer rating;
 
+    /**
+     * Optional free-text comment accompanying the review.
+     * Maximum length is enforced at the entity level (2 000 characters).
+     */
     private String comment;
 }

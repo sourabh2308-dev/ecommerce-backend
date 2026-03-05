@@ -6,20 +6,31 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
-// Data Repository - Provides database access via Spring Data JPA
 /**
- * DATA ACCESS OBJECT - Database Query Interface
- * 
- * Extends JpaRepository to provide:
- *   - CRUD operations (Create, Read, Update, Delete)
- *   - Pagination and sorting (@Query custom methods)
- *   - Soft-delete support (isDeleted flag)
- * 
- * Spring Data JPA dynamically generates SQL from method names.
+ * Spring Data JPA repository for {@link SellerDetail} entities.
+ * <p>
+ * Provides standard CRUD operations plus look-ups by the owning
+ * {@link User} for seller-verification workflows.
+ * </p>
+ *
+ * @see SellerDetail
  */
 public interface SellerDetailRepository extends JpaRepository<SellerDetail, Long> {
 
+    /**
+     * Retrieves the seller-detail record associated with the given user.
+     *
+     * @param user the seller {@link User}
+     * @return the matching detail record, if any
+     */
     Optional<SellerDetail> findByUser(User user);
 
+    /**
+     * Checks whether a seller-detail record already exists for the
+     * given user, avoiding duplicate submissions.
+     *
+     * @param user the {@link User} to check
+     * @return {@code true} if details have already been submitted
+     */
     boolean existsByUser(User user);
 }

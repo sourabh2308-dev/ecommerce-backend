@@ -5,79 +5,41 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-// Spring Configuration - Defines beans and infrastructure setup
-@Configuration
 /**
- * SPRING CONFIGURATION - Bean Definitions and App Setup
- * 
- * PURPOSE:
- * Defines Spring beans and application-level configuration.
- * Beans are singleton objects managed by Spring IoC container.
- * 
- * COMMON CONFIGURATION TYPES:
- * 
- * 1. FeignConfig:
- *    - Configures Feign client behavior (timeouts, error decoder)
- *    - Sets up request interceptors for adding headers
- * 
- * 2. KafkaConfig:
- *    - Producer: Serialization, acks, retries
- *    - Consumer: Deserialization, group ID, auto-commit
- * 
- * 3. CacheConfig:
- *    - Redis connection settings
- *    - Cache TTL (time-to-live) for @Cacheable
- * 
- * 4. WebConfig:
- *    - CORS mappings
- *    - Message converters (JSON, XML)
- *    - Interceptors
- * 
- * 5. AsyncConfig:
- *    - Thread pool for @Async methods
- *    - Executor configuration
- * 
- * BEAN LIFECYCLE:
- * @Bean annotations tell Spring to:
- * 1. Create instance of return type
- * 2. Manage as singleton in application context
- * 3. Inject into other classes via @Autowired
- * 
- * EXAMPLE:
- * @Bean
- * public RestTemplate restTemplate() {
- *   return new RestTemplate(); // Spring manages this instance
- * }
- * 
- * Usage in other classes:
- * @Autowired
- * private RestTemplate restTemplate; // Spring injects the bean
+ * Feign client configuration for the review-service.
+ *
+ * <p>Registers a global {@link RequestInterceptor} that attaches the shared
+ * internal secret ({@code X-Internal-Secret} header) to every outbound Feign
+ * request. This allows service-to-service calls (e.g.&nbsp;review-service
+ * calling order-service to verify a purchase) to pass the
+ * {@link InternalSecretFilter} on the receiving side without requiring a
+ * user JWT.
+ *
+ * <p>The secret value is injected from the {@code internal.secret} application
+ * property, which is typically supplied via environment variables in the
+ * Docker Compose configuration or Config Server.
+ *
+ * @see InternalSecretFilter
+ * @see com.sourabh.review_service.feign.OrderServiceClient
  */
+@Configuration
 public class FeignConfig {
 
+    /**
+     * Shared internal secret used for authenticating outbound
+     * service-to-service Feign calls, loaded from the
+     * {@code internal.secret} property.
+     */
     @Value("${internal.secret}")
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
     private String internalSecret;
 
-    @Bean
     /**
-     * FEIGNOUTBOUNDSECRETINTERCEPTOR - Method Documentation
+     * Creates a {@link RequestInterceptor} that appends the
+     * {@code X-Internal-Secret} header to every outgoing Feign HTTP request.
      *
-     * PURPOSE:
-     * This method handles the feignOutboundSecretInterceptor operation.
-     *
-     * RETURN VALUE:
-     * @return RequestInterceptor - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @Autowired - Applied to this method
-     * @Value - Applied to this method
-     * @Bean - Applied to this method
-     *
+     * @return the configured {@link RequestInterceptor} bean
      */
+    @Bean
     public RequestInterceptor feignOutboundSecretInterceptor() {
         return template -> template.header("X-Internal-Secret", internalSecret);
     }

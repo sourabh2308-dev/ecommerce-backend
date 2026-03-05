@@ -1,30 +1,21 @@
 package com.sourabh.product_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Thrown when a requested product cannot be found in the database.
+ *
+ * <p>Typically raised by the service layer when a lookup by UUID yields no
+ * result.  The {@link GlobalExceptionHandler} maps this exception to an HTTP
+ * {@code 404 Not Found} response with error code {@code PRODUCT_NOT_FOUND}.
+ *
+ * @see GlobalExceptionHandler#handleNotFound(ProductNotFoundException)
  */
 public class ProductNotFoundException extends RuntimeException {
 
+    /**
+     * Constructs a new {@code ProductNotFoundException}.
+     *
+     * @param message descriptive text, typically including the missing product UUID
+     */
     public ProductNotFoundException(String message) {
         super(message);
     }

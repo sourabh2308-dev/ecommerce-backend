@@ -8,79 +8,44 @@ import lombok.Setter;
 
 import java.util.List;
 
+/**
+ * Request DTO submitted by a buyer to create a new order.
+ *
+ * <p>Contains a list of {@link OrderItemRequest} items together with the
+ * buyer's shipping address details. All fields are validated via Bean
+ * Validation annotations; constraint violations result in a
+ * {@code 400 Bad Request} response with detailed error messages.</p>
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class CreateOrderRequest {
 
+    /** List of order items; must contain at least one valid entry. */
     @NotEmpty(message = "Order must contain at least one item")
-    // @NotEmpty applied to field below
-    // @NotEmpty applied to field below
     @Valid
-    // @Valid applied to field below
-    // @Valid applied to field below
     private List<OrderItemRequest> items;
 
-    // ── Shipping address ────────────────────────────────
-    /**
-
-     * VALIDATION: This field is required and cannot be blank.
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-     */
-
+    /** Full name of the shipping recipient (required). */
     @NotBlank(message = "Shipping name is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String shippingName;
 
+    /** Street address for delivery (required). */
     @NotBlank(message = "Shipping address is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String shippingAddress;
 
+    /** City for the shipping destination (required). */
     @NotBlank(message = "City is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String shippingCity;
 
+    /** State or province for shipping (required). */
     @NotBlank(message = "State is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String shippingState;
 
+    /** Postal / PIN code for shipping (required). */
     @NotBlank(message = "Pincode is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String shippingPincode;
 
+    /** Contact phone number for the shipping recipient (required). */
     @NotBlank(message = "Phone number is required")
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String shippingPhone;
 }

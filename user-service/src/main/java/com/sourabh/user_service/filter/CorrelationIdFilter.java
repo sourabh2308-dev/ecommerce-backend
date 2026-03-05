@@ -14,74 +14,45 @@ import java.io.IOException;
 import java.util.UUID;
 
 /**
- * Picks up the {@code X-Correlation-Id} header set by the API Gateway and
- * stores it in SLF4J MDC so it appears in every log statement for the request.
+ * Servlet filter that propagates a correlation identifier through the
+ * request lifecycle for distributed tracing.
  *
- * <p>Also attaches the header to the HTTP response so callers can trace
- * requests end-to-end.
+ * <p>If the incoming request carries an {@code X-Correlation-Id} header
+ * (typically injected by the API Gateway), that value is reused; otherwise
+ * a new random UUID is generated. The correlation ID is:</p>
+ * <ul>
+ *   <li>Stored in the SLF4J {@link MDC} under key {@value #MDC_KEY} so that
+ *       every log statement emitted during the request includes it.</li>
+ *   <li>Added to the HTTP response header so that callers can correlate
+ *       responses back to their requests.</li>
+ * </ul>
+ *
+ * <p>Registered with {@link Ordered#HIGHEST_PRECEDENCE} to ensure it runs
+ * before all other filters.</p>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-// HTTP Filter - Intercepts requests for cross-cutting concerns
-/**
- * HTTP REQUEST/RESPONSE FILTER - Interceptor for Cross-Cutting Concerns
- * 
- * PURPOSE:
- * Intercepts every HTTP request and response passing through this service.
- * Implements cross-cutting concerns like authentication, logging, header
- * injection, request validation before reaching controller methods.
- * 
- * FILTER CHAIN:
- * Request → Filter1 → Filter2 → ... → Controller → ... → Filter2 → Filter1 → Response
- * 
- * EXECUTION ORDER:
- * Controlled by @Order annotation (lower number = higher priority)
- * Common order:
- *   1. @Order(1): CORS filter
- *   2. @Order(2): Authentication filter (JWT validation)
- *   3. @Order(3): Authorization filter (role checks)
- *   4. @Order(4): Logging filter
- *   5. @Order(5): Rate limiting filter
- * 
- * FILTER TYPES:
- * 
- * 1. JwtAuthenticationFilter:
- *    - Validates JWT token from Authorization header
- *    - Extracts user claims (uuid, role, email)
- *    - Sets Spring Security context for @PreAuthorize to work
- * 
- * 2. HeaderInjectionFilter:
- *    - Injects custom headers (X-User-UUID, X-User-Role)
- *    - Used by downstream services/controllers
- * 
- * 3. InternalSecretFilter:
- *    - Validates internal service-to-service calls
- *    - Checks X-Internal-Secret header matches configured secret
- * 
- * 4. LoggingFilter:
- *    - Logs request method, path, headers, body
- *    - Logs response status, body, duration
- * 
- * IMPLEMENTATION PATTERN:
- * class MyFilter implements Filter {
- *   @Override
- *   public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) {
- *     // Pre-processing (before controller)
- *     HttpServletRequest request = (HttpServletRequest) req;
- *     
- *     // Pass to next filter/controller
- *     chain.doFilter(request, response);
- *     
- *     // Post-processing (after controller)
- *     HttpServletResponse response = (HttpServletResponse) res;
- *   }
- * }
- */
 public class CorrelationIdFilter extends OncePerRequestFilter {
 
+    /** HTTP header name used to carry the correlation identifier. */
     public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+
+    /** MDC key under which the correlation ID is stored for log output. */
     public static final String MDC_KEY = "correlationId";
 
+    /**
+     * Extracts or generates a correlation ID, places it in the MDC and the
+     * response header, then delegates to the rest of the filter chain.
+     *
+     * <p>The MDC entry is always removed in a {@code finally} block to
+     * prevent leaking into pooled threads.</p>
+     *
+     * @param request     the incoming HTTP request
+     * @param response    the HTTP response
+     * @param filterChain the remaining filter chain to invoke
+     * @throws ServletException if a servlet error occurs
+     * @throws IOException      if an I/O error occurs
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,

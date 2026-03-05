@@ -24,9 +24,31 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Consumes order.created events and processes payment automatically as part of
- * the Order-Payment Saga. Creates payment splits per seller for revenue sharing.
- * Idempotent: skips already-processed events.
+ * Kafka consumer that listens to the {@code order.created} topic and
+ * automatically processes payments as part of the <b>Order-Payment Saga</b>.
+ *
+ * <p><b>Saga flow handled here:</b>
+ * <ol>
+ *   <li>Order service publishes an {@link OrderCreatedEvent}.</li>
+ *   <li>This consumer creates a {@link Payment} record with status
+ *       {@code INITIATED}, simulates the payment (100 % success for demo),
+ *       and persists the final status.</li>
+ *   <li>If the payment succeeds, per-seller {@link PaymentSplit} records are
+ *       created (platform fee, delivery fee, and seller payout).</li>
+ *   <li>A {@link PaymentCompletedEvent} is published to
+ *       {@code payment.completed} so the order service can finalise the
+ *       order status.</li>
+ * </ol>
+ *
+ * <p><b>Idempotency:</b> Duplicate events are detected via the
+ * {@link ProcessedEventRepository} (event ID lookup) <em>and</em> by
+ * checking whether a payment already exists for the order UUID.
+ *
+ * <p><b>Retry policy:</b> Up to 3 attempts with exponential back-off
+ * (1 s, 2 s).  Failed messages are routed to a dead-letter topic
+ * ({@code order.created.DLT}).
+ *
+ * @see com.sourabh.payment_service.service.impl.PaymentServiceImpl
  */
 @Component
 @RequiredArgsConstructor
@@ -38,23 +60,35 @@ public class OrderEventConsumer {
     private final ProcessedEventRepository processedEventRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
+    /** Platform commission percentage (default 10 %). */
     @Value("${payment.platform-fee-percent:10.0}")
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
     private double platformFeePercent;
 
+    /** Flat delivery fee charged per item (default 30 INR). */
     @Value("${payment.delivery-fee-per-item:30.0}")
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
     private double deliveryFeePerItem;
 
+    /** Kafka topic for outbound payment-completed events. */
     private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
+
+    /** Kafka topic for inbound order-created events. */
     private static final String TOPIC_ORDER_CREATED = "order.created";
 
+    /**
+     * Processes an {@link OrderCreatedEvent} received from Kafka.
+     *
+     * <p>Guarded by two idempotency checks:
+     * <ol>
+     *   <li>Event ID lookup in {@code processed_events} table.</li>
+     *   <li>Order UUID existence check in {@code payment} table.</li>
+     * </ol>
+     *
+     * <p>On success the method creates the payment, computes revenue splits,
+     * records the event as processed, and publishes a
+     * {@link PaymentCompletedEvent}.
+     *
+     * @param event the deserialized order-created event
+     */
     @RetryableTopic(
             attempts = "3",
             backoff = @Backoff(delay = 1000, multiplier = 2.0),
@@ -62,91 +96,18 @@ public class OrderEventConsumer {
             dltTopicSuffix = ".DLT",
             autoCreateTopics = "true"
     )
-    /**
-
-     * KAFKA EVENT CONSUMER - Async Event Processing
-
-     * 
-
-     * PURPOSE:
-
-     * Subscribes to Kafka topic and processes events asynchronously.
-
-     * Part of event-driven architecture for inter-service communication.
-
-     * 
-
-     * HOW IT WORKS:
-
-     * 1. Spring Kafka polls topic for new messages
-
-     * 2. Deserializes JSON to event object
-
-     * 3. Invokes this method in consumer thread pool
-
-     * 4. Acknowledges message on successful processing
-
-     * 5. On exception, retries or sends to DLQ (Dead Letter Queue)
-
-     * 
-
-     * @KafkaListener annotation parameters:
-
-     * - topics: Topic name(s) to subscribe to
-
-     * - groupId: Consumer group (enables load balancing)
-
-     * - containerFactory: Custom config for concurrency, error handling
-
-     * 
-
-     * EVENTUAL CONSISTENCY:
-
-     * Kafka ensures at-least-once delivery. Method must be idempotent
-
-     * (safe to process same event multiple times).
-
-     * 
-
-     * ERROR HANDLING:
-
-     * - Exceptions trigger retry mechanism (configurable retry count)
-
-     * - Failed messages after retries sent to DLQ topic
-
-     * - Use @Transactional to rollback DB changes on error
-
-     */
-
     @KafkaListener(topics = TOPIC_ORDER_CREATED, groupId = "payment-service")
     @Transactional
-    /**
-     * HANDLEORDERCREATED - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the handleOrderCreated operation.
-     *
-     * PARAMETERS:
-     * @param event - OrderCreatedEvent value
-     *
-     * ANNOTATIONS USED:
-     * @Transactional - Wraps in database transaction (atomic execution)
-     * @KafkaListener - Consumes events from Kafka topic
-     * @Transactional - Wraps in database transaction (atomic execution)
-     *
-     */
     public void handleOrderCreated(OrderCreatedEvent event) {
         log.info("Received OrderCreatedEvent: eventId={}, orderUuid={}, items={}",
                 event.getEventId(), event.getOrderUuid(),
                 event.getItems() != null ? event.getItems().size() : 0);
 
-        // Idempotency guard — skip if this event was already processed
         if (processedEventRepository.existsByEventId(event.getEventId())) {
             log.warn("Duplicate event detected, skipping: eventId={}", event.getEventId());
             return;
         }
 
-        // Avoid double-payment for the same order (e.g. REST + event both trigger)
         if (paymentRepository.existsByOrderUuid(event.getOrderUuid())) {
             log.warn("Payment already exists for orderUuid={}, skipping event processing", event.getOrderUuid());
             return;
@@ -163,35 +124,42 @@ public class OrderEventConsumer {
                 .build();
         paymentRepository.save(payment);
 
-        // Simulate payment gateway (100% success for demo)
-        boolean success = true; // Changed from Math.random() > 0.2 for reliable demo
+        boolean success = true;
         PaymentStatus finalStatus = success ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
         payment.setStatus(finalStatus);
         paymentRepository.save(payment);
 
         log.info("Auto-payment processed via Saga: orderUuid={}, status={}", event.getOrderUuid(), finalStatus);
 
-        // Create payment splits per seller/item when payment succeeds
         if (finalStatus == PaymentStatus.SUCCESS && event.getItems() != null) {
             createPaymentSplits(paymentUuid, event.getOrderUuid(), event.getItems());
         }
 
-        // Mark event as processed
         processedEventRepository.save(ProcessedEvent.builder()
                 .eventId(event.getEventId())
                 .topic(TOPIC_ORDER_CREATED)
                 .processedAt(LocalDateTime.now())
                 .build());
 
-        // Notify order-service of the payment outcome
         kafkaTemplate.send(TOPIC_PAYMENT_COMPLETED,
                 new PaymentCompletedEvent(event.getOrderUuid(), finalStatus.name(), paymentUuid));
         log.info("PaymentCompletedEvent published for Saga: orderUuid={}, status={}", event.getOrderUuid(), finalStatus);
     }
 
     /**
-     * Creates a PaymentSplit record for each order item, calculating
-     * platform fee, delivery fee and net seller payout.
+     * Creates a {@link PaymentSplit} record for every order line item,
+     * computing platform fee, delivery fee, and net seller payout.
+     *
+     * <p><b>Formula per item:</b>
+     * <pre>
+     *   platformFee  = round(itemAmount * (platformFeePercent / 100), 2)
+     *   deliveryFee  = deliveryFeePerItem * quantity
+     *   sellerPayout = max(itemAmount - platformFee - deliveryFee, 0)
+     * </pre>
+     *
+     * @param paymentUuid UUID of the parent payment
+     * @param orderUuid   UUID of the order
+     * @param items       list of line items from the order event
      */
     private void createPaymentSplits(String paymentUuid, String orderUuid, List<OrderItemEvent> items) {
         List<PaymentSplit> splits = new ArrayList<>();

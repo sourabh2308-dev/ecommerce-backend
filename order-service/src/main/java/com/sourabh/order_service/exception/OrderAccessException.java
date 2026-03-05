@@ -1,28 +1,20 @@
 package com.sourabh.order_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Runtime exception thrown when a user attempts to access or modify an order
+ * that they do not own or are not authorised to interact with.
+ *
+ * <p>Caught by the {@link GlobalExceptionHandler} and mapped to an HTTP
+ * {@code 403 Forbidden} response with error code {@code ORDER_ACCESS_DENIED}.</p>
+ *
+ * @see GlobalExceptionHandler#handleAccess(OrderAccessException)
  */
 public class OrderAccessException extends RuntimeException {
+
+    /**
+     * Constructs a new {@code OrderAccessException} with the specified detail message.
+     *
+     * @param message a human-readable description of the access violation
+     */
     public OrderAccessException(String message) { super(message); }
 }

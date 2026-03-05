@@ -12,47 +12,45 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.LocalDateTime;
 
 /**
- * Shared audit fields for all entities.
- * Spring Data JPA populates {@code createdAt} and {@code updatedAt}
- * automatically when {@code @EnableJpaAuditing} is present on the main class.
+ * Abstract mapped superclass that provides automatic auditing timestamps
+ * for all JPA entities in the order-service.
+ *
+ * <p>Entities extending this class automatically inherit {@code createdAt} and
+ * {@code updatedAt} columns whose values are managed by Spring Data JPA's
+ * {@link AuditingEntityListener}. The application configuration must enable
+ * JPA auditing with {@code @EnableJpaAuditing} for the timestamps to be
+ * populated on persist and merge operations.</p>
+ *
+ * <p>Subclasses include {@link Order}, {@link Coupon}, and {@link ReturnRequest}.</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
  */
 @MappedSuperclass
-// JPA Entity - Domain model persisted in database
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter
 public abstract class BaseAuditEntity {
 
-    @CreatedDate
     /**
-
-     * DATABASE COLUMN MAPPING
-
-     * 
-
-     * @Column configures how this field maps to database column:
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-     * - nullable: Can be NULL in database (default: true)
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-     * - updatable: Can be modified after insert (default: true)
-
-     * - insertable: Included in INSERT statements (default: true)
-
-     * 
-
-     * JPA auto-generates SQL schema based on these annotations.
-
+     * Timestamp recording when the entity was first persisted.
+     *
+     * <p>Set automatically by Spring Data JPA on the initial {@code save()} call.
+     * The column is marked {@code updatable = false} so the value remains
+     * immutable after creation.</p>
      */
-
+    @CreatedDate
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * Timestamp recording the most recent modification to the entity.
+     *
+     * <p>Updated automatically by Spring Data JPA on every subsequent
+     * {@code save()} call. Useful for change-tracking, cache invalidation,
+     * and optimistic-locking strategies.</p>
+     */
     @LastModifiedDate
     private LocalDateTime updatedAt;
 }

@@ -1,2 +1,22 @@
--- order-service: unified schema for JPA auto-creation
--- This file is for documentation only; JPA will create the schema.
+-- =============================================================================
+-- ORDER SERVICE DATABASE SCHEMA
+-- =============================================================================
+--
+-- Database   : PostgreSQL 15+
+-- Service    : order-service (Spring Boot 3.2.5, Java 17)
+-- Strategy   : JPA/Hibernate manages schema creation and migrations via
+--              spring.jpa.hibernate.ddl-auto (set to "validate" in production).
+--
+-- This file serves as documentation of the expected schema structure.
+-- Tables are created automatically by Hibernate based on JPA entity mappings:
+--
+--   orders              - Main order records with buyer, status, totals, shipping
+--   order_items          - Line items linked to orders (product, seller, qty, price)
+--   coupons              - Discount coupon definitions (percentage / fixed amount)
+--   coupon_usages        - Per-user coupon redemption audit trail
+--   return_requests      - Return/exchange requests with approval workflow
+--   shipment_trackings   - Shipment tracking events (status, location, carrier)
+--
+-- In production the ddl-auto is "validate" so the schema must already exist.
+-- Use Flyway or Liquibase for production migrations.
+-- =============================================================================

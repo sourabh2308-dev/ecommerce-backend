@@ -13,26 +13,45 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
- * Email service implementation using Spring Mail (SMTP).
+ * Implementation of {@link EmailService} using Spring Mail and SMTP.
  *
- * Sends HTML-formatted OTP emails asynchronously so the calling thread
- * is not blocked by SMTP latency. If sending fails the error is logged
- * but does NOT propagate — the OTP is still persisted in the database
- * and the user can request a resend.
+ * <p>All send methods are annotated with {@code @Async} so that SMTP I/O runs on
+ * a separate thread pool, preventing the calling thread (e.g. the HTTP request
+ * handler) from blocking on network latency. Failures are logged but <strong>not
+ * propagated</strong>; the OTP is already persisted in the database, so the user
+ * can request a resend if the email is lost.</p>
+ *
+ * <p>Configuration is drawn from {@code application.properties}:</p>
+ * <ul>
+ *   <li>{@code app.mail.from-address} &ndash; the sender email address</li>
+ *   <li>{@code app.mail.from-name} &ndash; the sender display name</li>
+ *   <li>{@code spring.mail.*} &ndash; standard Spring Mail SMTP settings</li>
+ * </ul>
+ *
+ * @see EmailService
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class EmailServiceImpl implements EmailService {
 
+    /** Spring-provided SMTP mail sender. */
     private final JavaMailSender mailSender;
 
+    /** Sender email address shown in the "From" header. */
     @Value("${app.mail.from-address:noreply@ecommerce.com}")
     private String fromAddress;
 
+    /** Sender display name shown alongside the email address. */
     @Value("${app.mail.from-name:E-Commerce Platform}")
     private String fromName;
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Constructs a branded HTML email using {@link #buildOtpHtml(String, String, String)}
+     * and sends it asynchronously via SMTP.</p>
+     */
     @Override
     @Async
     public void sendOtpEmail(String toEmail, String userName, String otpCode, String subject) {
@@ -53,6 +72,12 @@ public class EmailServiceImpl implements EmailService {
         }
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Sends an arbitrary HTML body (e.g. order confirmation, delivery notification)
+     * asynchronously via SMTP.</p>
+     */
     @Override
     @Async
     public void sendHtmlEmail(String toEmail, String subject, String htmlBody) {
@@ -70,6 +95,13 @@ public class EmailServiceImpl implements EmailService {
         }
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Decodes the Base64 PDF payload, attaches it as
+     * {@code invoice-{orderUuid}.pdf} (MIME type {@code application/pdf}),
+     * and sends the email asynchronously.</p>
+     */
     @Override
     @Async
     public void sendInvoiceEmail(String toEmail, String orderUuid, String pdfBase64) {
@@ -96,8 +128,17 @@ public class EmailServiceImpl implements EmailService {
         }
     }
 
-    // ─── Private helpers ──────────────────────────────────────────────────
-
+    /**
+     * Builds a branded HTML email template for OTP verification.
+     *
+     * <p>The template includes the subject as a header, a personalized greeting,
+     * the OTP code in large styled text, and a footer with a 5-minute validity notice.</p>
+     *
+     * @param userName the recipient's first name (falls back to "User" if blank)
+     * @param otpCode  the 6-digit OTP code to display
+     * @param subject  the email subject, also used as the template header
+     * @return the complete HTML string ready for sending
+     */
     private String buildOtpHtml(String userName, String otpCode, String subject) {
         String displayName = (userName != null && !userName.isBlank()) ? userName : "User";
 

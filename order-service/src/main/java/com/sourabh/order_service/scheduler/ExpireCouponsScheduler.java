@@ -13,25 +13,50 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Automatically deactivates expired coupons.
- * Runs periodically to mark coupons with valid_until < now() as inactive.
+ * Scheduled task that automatically deactivates coupons whose validity
+ * window has passed.
+ *
+ * <p>Runs at a configurable interval (default: every hour) and sets
+ * {@code isActive = false} on all coupons whose {@code validUntil}
+ * timestamp is in the past but whose {@code isActive} flag is still
+ * {@code true}.</p>
+ *
+ * <p>Configuration properties:
+ * <ul>
+ *   <li>{@code scheduler.expire-coupons.enabled} — master on/off
+ *       switch (default {@code true})</li>
+ *   <li>{@code scheduler.expire-coupons.cron} — cron expression
+ *       (default {@code 0 0 * * * *})</li>
+ * </ul>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ * @see CouponRepository#findByValidUntilBeforeAndIsActiveTrue(LocalDateTime)
+ * @see Coupon
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class ExpireCouponsScheduler {
 
+    /** Coupon repository for querying and persisting coupon status. */
     private final CouponRepository couponRepository;
 
+    /** Whether this scheduler is enabled. */
     @Value("${scheduler.expire-coupons.enabled:true}")
     private boolean enabled;
 
-    @Value("${scheduler.expire-coupons.cron:0 0 * * * *}")  // Every hour
+    /** Cron expression controlling the scheduler's execution frequency. */
+    @Value("${scheduler.expire-coupons.cron:0 0 * * * *}")
     private String cronExpression;
 
     /**
-     * Run at configured interval (default: every hour).
-     * Deactivate coupons where valid_until < now().
+     * Scans for active coupons that have exceeded their {@code validUntil}
+     * timestamp and marks them as inactive.
+     *
+     * <p>Each coupon is deactivated individually so that a failure on one
+     * record does not prevent the remaining coupons from being processed.</p>
      */
     @Scheduled(cron = "${scheduler.expire-coupons.cron:0 0 * * * *}")
     @Transactional

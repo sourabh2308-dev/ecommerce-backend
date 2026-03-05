@@ -20,140 +20,73 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Global rate-limiting filter for the API Gateway.
+ * Global rate-limiting filter that enforces per-client request quotas at the
+ * API Gateway level using the token-bucket algorithm.
  *
- * <p>Implements a token bucket algorithm using Bucket4j with an in-memory
- * store (one bucket per client IP). Each IP is allowed 100 requests per
- * minute. Requests exceeding the limit receive HTTP 429 Too Many Requests.
+ * <h3>Algorithm</h3>
+ * <p>Each unique client IP address is allocated a {@link Bucket} that holds up
+ * to {@value #REQUEST_LIMIT} tokens. Tokens are refilled greedily every
+ * {@code 1 minute}. When a request arrives, one token is consumed; if the
+ * bucket is empty the client receives an {@code HTTP 429 Too Many Requests}
+ * response along with an {@code X-Rate-Limit-Retry-After-Seconds} header.</p>
  *
- * <p>The Redis reactive template is injected as an optional future upgrade
- * path for distributed bucket synchronisation across multiple gateway replicas.
+ * <h3>Storage</h3>
+ * <p>Buckets are currently stored in an in-memory {@link ConcurrentHashMap},
+ * which is suitable for single-node deployments. A
+ * {@link ReactiveStringRedisTemplate} is injected as a future upgrade path
+ * for distributed rate-limit synchronisation across multiple gateway
+ * replicas.</p>
+ *
+ * <h3>Filter Ordering</h3>
+ * <p>Runs at {@code HIGHEST_PRECEDENCE + 1}, immediately after
+ * {@link CorrelationIdGlobalFilter}, so rate-limited requests are rejected
+ * before any expensive downstream processing (authentication, routing)
+ * takes place.</p>
+ *
+ * @see CorrelationIdGlobalFilter
  */
 @Component
 @Slf4j
-// HTTP Filter - Intercepts requests for cross-cutting concerns
-/**
- * HTTP REQUEST/RESPONSE FILTER - Interceptor for Cross-Cutting Concerns
- * 
- * PURPOSE:
- * Intercepts every HTTP request and response passing through this service.
- * Implements cross-cutting concerns like authentication, logging, header
- * injection, request validation before reaching controller methods.
- * 
- * FILTER CHAIN:
- * Request → Filter1 → Filter2 → ... → Controller → ... → Filter2 → Filter1 → Response
- * 
- * EXECUTION ORDER:
- * Controlled by @Order annotation (lower number = higher priority)
- * Common order:
- *   1. @Order(1): CORS filter
- *   2. @Order(2): Authentication filter (JWT validation)
- *   3. @Order(3): Authorization filter (role checks)
- *   4. @Order(4): Logging filter
- *   5. @Order(5): Rate limiting filter
- * 
- * FILTER TYPES:
- * 
- * 1. JwtAuthenticationFilter:
- *    - Validates JWT token from Authorization header
- *    - Extracts user claims (uuid, role, email)
- *    - Sets Spring Security context for @PreAuthorize to work
- * 
- * 2. HeaderInjectionFilter:
- *    - Injects custom headers (X-User-UUID, X-User-Role)
- *    - Used by downstream services/controllers
- * 
- * 3. InternalSecretFilter:
- *    - Validates internal service-to-service calls
- *    - Checks X-Internal-Secret header matches configured secret
- * 
- * 4. LoggingFilter:
- *    - Logs request method, path, headers, body
- *    - Logs response status, body, duration
- * 
- * IMPLEMENTATION PATTERN:
- * class MyFilter implements Filter {
- *   @Override
- *   public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) {
- *     // Pre-processing (before controller)
- *     HttpServletRequest request = (HttpServletRequest) req;
- *     
- *     // Pass to next filter/controller
- *     chain.doFilter(request, response);
- *     
- *     // Post-processing (after controller)
- *     HttpServletResponse response = (HttpServletResponse) res;
- *   }
- * }
- */
-/**
- * HTTP REQUEST/RESPONSE FILTER - Interceptor for Cross-Cutting Concerns
- * 
- * PURPOSE:
- * Intercepts every HTTP request and response passing through this service.
- * Implements cross-cutting concerns like authentication, logging, header
- * injection, request validation before reaching controller methods.
- * 
- * FILTER CHAIN:
- * Request → Filter1 → Filter2 → ... → Controller → ... → Filter2 → Filter1 → Response
- * 
- * EXECUTION ORDER:
- * Controlled by @Order annotation (lower number = higher priority)
- * Common order:
- *   1. @Order(1): CORS filter
- *   2. @Order(2): Authentication filter (JWT validation)
- *   3. @Order(3): Authorization filter (role checks)
- *   4. @Order(4): Logging filter
- *   5. @Order(5): Rate limiting filter
- * 
- * FILTER TYPES:
- * 
- * 1. JwtAuthenticationFilter:
- *    - Validates JWT token from Authorization header
- *    - Extracts user claims (uuid, role, email)
- *    - Sets Spring Security context for @PreAuthorize to work
- * 
- * 2. HeaderInjectionFilter:
- *    - Injects custom headers (X-User-UUID, X-User-Role)
- *    - Used by downstream services/controllers
- * 
- * 3. InternalSecretFilter:
- *    - Validates internal service-to-service calls
- *    - Checks X-Internal-Secret header matches configured secret
- * 
- * 4. LoggingFilter:
- *    - Logs request method, path, headers, body
- *    - Logs response status, body, duration
- * 
- * IMPLEMENTATION PATTERN:
- * class MyFilter implements Filter {
- *   @Override
- *   public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain) {
- *     // Pre-processing (before controller)
- *     HttpServletRequest request = (HttpServletRequest) req;
- *     
- *     // Pass to next filter/controller
- *     chain.doFilter(request, response);
- *     
- *     // Post-processing (after controller)
- *     HttpServletResponse response = (HttpServletResponse) res;
- *   }
- * }
- */
 public class RateLimitGlobalFilter implements GlobalFilter, Ordered {
 
+    /** Maximum number of requests a single IP may issue per refill window. */
     private static final int REQUEST_LIMIT = 100;
+
+    /** Duration of the token refill window. */
     private static final Duration REFILL_DURATION = Duration.ofMinutes(1);
 
-    /** Per-IP token buckets — suitable for a single-node gateway deployment. */
+    /** Per-IP token buckets; suitable for a single-node gateway deployment. */
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
+    /**
+     * Reactive Redis template injected for future distributed rate-limit
+     * synchronisation. Currently unused but wired for an upgrade path.
+     */
     private final ReactiveStringRedisTemplate redisTemplate;
 
+    /**
+     * Constructs the filter with the provided Redis template.
+     *
+     * @param redisTemplate reactive Redis string template for potential
+     *                      distributed bucket storage
+     */
     public RateLimitGlobalFilter(ReactiveStringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
 
+    /**
+     * Applies rate limiting to the incoming request.
+     *
+     * <p>The client IP is resolved (respecting {@code X-Forwarded-For} when
+     * present) and the corresponding token bucket is consulted. If a token is
+     * available the request proceeds; otherwise a {@code 429} response is
+     * returned immediately.</p>
+     *
+     * @param exchange the current server exchange
+     * @param chain    provides a way to delegate to the next filter
+     * @return {@link Mono} that completes when the downstream chain finishes
+     *         or when the rate-limited response has been written
+     */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String clientIp = resolveClientIp(exchange);
@@ -171,14 +104,27 @@ public class RateLimitGlobalFilter implements GlobalFilter, Ordered {
                 });
     }
 
+    /**
+     * Returns the filter's execution order.
+     *
+     * <p>{@code HIGHEST_PRECEDENCE + 1} ensures this filter runs immediately
+     * after the correlation-ID filter but before security and routing.</p>
+     *
+     * @return the order value
+     */
     @Override
     public int getOrder() {
-        // Run early in the filter chain, before routing
         return Ordered.HIGHEST_PRECEDENCE + 1;
     }
 
-    // ─── Helpers ────────────────────────────────────────────────────────────
-
+    /**
+     * Retrieves or creates the token bucket associated with the given client
+     * IP address. Buckets are configured with a classic bandwidth limit using
+     * greedy refill.
+     *
+     * @param clientIp the resolved client IP address
+     * @return the {@link Bucket} for the specified IP
+     */
     private Bucket resolveBucket(String clientIp) {
         return buckets.computeIfAbsent(clientIp, ip -> {
             Bandwidth limit = Bandwidth.classic(
@@ -189,8 +135,19 @@ public class RateLimitGlobalFilter implements GlobalFilter, Ordered {
         });
     }
 
+    /**
+     * Resolves the originating client IP address from the exchange.
+     *
+     * <p>When the gateway sits behind a load balancer or reverse proxy the
+     * real client IP is typically found in the {@code X-Forwarded-For} header
+     * (the first comma-separated value). If the header is absent, the TCP
+     * remote address of the connection is used instead.</p>
+     *
+     * @param exchange the current server exchange
+     * @return the best-effort client IP address, or {@code "unknown"} if it
+     *         cannot be determined
+     */
     private String resolveClientIp(ServerWebExchange exchange) {
-        // Prefer X-Forwarded-For for requests passing through a load balancer
         String forwarded = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
             return forwarded.split(",")[0].trim();

@@ -4,77 +4,41 @@ import jakarta.validation.constraints.*;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Request DTO for creating a new product listing.
+ *
+ * <p>Submitted by sellers via the product creation endpoint.  All mandatory
+ * fields are enforced with Bean Validation annotations; constraint violations
+ * result in a {@code 400 Bad Request} response containing field-level error
+ * details.
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class CreateProductRequest {
 
-    /**
-
-
-     * VALIDATION: This field is required and cannot be blank.
-
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-
-     */
-
-
+    /** Product display name (required, max 255 characters). */
     @NotBlank
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     @Size(max = 255)
-    // Validation constraint
-    // @Size - Validates input before processing
-    // Validation constraint
-    // @Size - Validates input before processing
     private String name;
 
+    /** Optional long-form product description (max 2 000 characters). */
     @Size(max = 2000)
-    // Validation constraint
-    // @Size - Validates input before processing
-    // Validation constraint
-    // @Size - Validates input before processing
     private String description;
 
+    /** Unit price in the default currency; must be a positive number. */
     @NotNull
-    // Validation constraint
-    // @NotNull - Validates input before processing
     @Positive
-    // @Positive applied to field below
-    // @Positive applied to field below
     private Double price;
 
+    /** Initial stock quantity; must be zero or greater. */
     @NotNull
-    // Validation constraint
-    // @NotNull - Validates input before processing
     @Min(0)
-    // Validation constraint
-    // @Min - Validates input before processing
-    // Validation constraint
-    // @Min - Validates input before processing
     private Integer stock;
 
+    /** Category identifier (name or UUID) the product belongs to. */
     @NotBlank
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String category;
 
+    /** Optional URL pointing to the primary product image. */
     private String imageUrl;
 }

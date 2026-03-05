@@ -16,16 +16,35 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Implementation of {@link AddressService} for managing user shipping/billing addresses.
+ *
+ * <p>Addresses are stored in the {@code addresses} table with a many-to-one relationship
+ * to {@link User}. A maximum of {@value #MAX_ADDRESSES} addresses are allowed per user.
+ * Exactly one address may be marked as the default at any time; setting a new default
+ * automatically clears the previous one.</p>
+ *
+ * <p>All write operations are wrapped in Spring-managed transactions to guarantee
+ * atomicity (e.g. clearing the old default and setting the new one happen together).</p>
+ *
+ * @see AddressService
+ * @see AddressRepository
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class AddressServiceImpl implements AddressService {
 
+    /** Repository for {@link Address} persistence operations. */
     private final AddressRepository addressRepository;
+
+    /** Repository for {@link User} lookups. */
     private final UserRepository userRepository;
 
+    /** Maximum number of addresses a single user may store. */
     private static final int MAX_ADDRESSES = 10;
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public List<AddressResponse> getAddresses(String userUuid) {
@@ -36,6 +55,7 @@ public class AddressServiceImpl implements AddressService {
                 .toList();
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public AddressResponse addAddress(String userUuid, AddressRequest request) {
@@ -45,7 +65,6 @@ public class AddressServiceImpl implements AddressService {
             throw new UserStateException("Maximum " + MAX_ADDRESSES + " addresses allowed");
         }
 
-        // If this is the first address or marked as default, handle default flag
         boolean makeDefault = request.isDefault() || addressRepository.countByUser(user) == 0;
         if (makeDefault) {
             clearDefaultAddress(user);
@@ -69,6 +88,7 @@ public class AddressServiceImpl implements AddressService {
         return mapToResponse(address);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public AddressResponse updateAddress(String userUuid, String addressUuid, AddressRequest request) {
@@ -95,6 +115,7 @@ public class AddressServiceImpl implements AddressService {
         return mapToResponse(address);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public void deleteAddress(String userUuid, String addressUuid) {
@@ -105,6 +126,7 @@ public class AddressServiceImpl implements AddressService {
         log.info("Address deleted: addressUuid={}", addressUuid);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public AddressResponse setDefaultAddress(String userUuid, String addressUuid) {
@@ -120,6 +142,11 @@ public class AddressServiceImpl implements AddressService {
         return mapToResponse(address);
     }
 
+    /**
+     * Clears the {@code isDefault} flag on the user's current default address, if any.
+     *
+     * @param user the user whose default address should be cleared
+     */
     private void clearDefaultAddress(User user) {
         addressRepository.findByUserAndIsDefaultTrue(user).ifPresent(existing -> {
             existing.setDefault(false);
@@ -127,11 +154,23 @@ public class AddressServiceImpl implements AddressService {
         });
     }
 
+    /**
+     * Looks up a {@link User} by UUID or throws {@link UserNotFoundException}.
+     *
+     * @param userUuid the UUID to search for
+     * @return the matching {@link User} entity
+     */
     private User findUser(String userUuid) {
         return userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
     }
 
+    /**
+     * Maps an {@link Address} entity to an {@link AddressResponse} DTO.
+     *
+     * @param address the entity to convert
+     * @return the corresponding response DTO
+     */
     private AddressResponse mapToResponse(Address address) {
         return AddressResponse.builder()
                 .uuid(address.getUuid())

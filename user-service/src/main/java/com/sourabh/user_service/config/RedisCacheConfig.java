@@ -18,126 +18,52 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
-// Spring Configuration - Defines beans and infrastructure setup
+/**
+ * Redis cache configuration for the user-service.
+ *
+ * <p>Enables Spring's {@code @Cacheable} / {@code @CacheEvict} abstraction
+ * backed by a Redis store. Cached entries use JSON serialisation (via Jackson)
+ * so that they are human-readable in Redis and portable across JVM restarts.</p>
+ *
+ * <h3>Cache regions</h3>
+ * <ul>
+ *   <li>{@value #USERS_BY_EMAIL_CACHE} &ndash; keyed by email address
+ *       (used heavily by auth-service on every login)</li>
+ *   <li>{@value #USERS_BY_UUID_CACHE} &ndash; keyed by user UUID</li>
+ * </ul>
+ *
+ * <p>All caches default to a 15-minute TTL.</p>
+ *
+ * @see org.springframework.cache.annotation.Cacheable
+ * @see org.springframework.cache.annotation.CacheEvict
+ */
 @Configuration
 @EnableCaching
-/**
- * SPRING CONFIGURATION - Bean Definitions and App Setup
- * 
- * PURPOSE:
- * Defines Spring beans and application-level configuration.
- * Beans are singleton objects managed by Spring IoC container.
- * 
- * COMMON CONFIGURATION TYPES:
- * 
- * 1. FeignConfig:
- *    - Configures Feign client behavior (timeouts, error decoder)
- *    - Sets up request interceptors for adding headers
- * 
- * 2. KafkaConfig:
- *    - Producer: Serialization, acks, retries
- *    - Consumer: Deserialization, group ID, auto-commit
- * 
- * 3. CacheConfig:
- *    - Redis connection settings
- *    - Cache TTL (time-to-live) for @Cacheable
- * 
- * 4. WebConfig:
- *    - CORS mappings
- *    - Message converters (JSON, XML)
- *    - Interceptors
- * 
- * 5. AsyncConfig:
- *    - Thread pool for @Async methods
- *    - Executor configuration
- * 
- * BEAN LIFECYCLE:
- * @Bean annotations tell Spring to:
- * 1. Create instance of return type
- * 2. Manage as singleton in application context
- * 3. Inject into other classes via @Autowired
- * 
- * EXAMPLE:
- * @Bean
- * public RestTemplate restTemplate() {
- *   return new RestTemplate(); // Spring manages this instance
- * }
- * 
- * Usage in other classes:
- * @Autowired
- * private RestTemplate restTemplate; // Spring injects the bean
- */
-/**
- * SPRING CONFIGURATION - Bean Definitions and App Setup
- * 
- * PURPOSE:
- * Defines Spring beans and application-level configuration.
- * Beans are singleton objects managed by Spring IoC container.
- * 
- * COMMON CONFIGURATION TYPES:
- * 
- * 1. FeignConfig:
- *    - Configures Feign client behavior (timeouts, error decoder)
- *    - Sets up request interceptors for adding headers
- * 
- * 2. KafkaConfig:
- *    - Producer: Serialization, acks, retries
- *    - Consumer: Deserialization, group ID, auto-commit
- * 
- * 3. CacheConfig:
- *    - Redis connection settings
- *    - Cache TTL (time-to-live) for @Cacheable
- * 
- * 4. WebConfig:
- *    - CORS mappings
- *    - Message converters (JSON, XML)
- *    - Interceptors
- * 
- * 5. AsyncConfig:
- *    - Thread pool for @Async methods
- *    - Executor configuration
- * 
- * BEAN LIFECYCLE:
- * @Bean annotations tell Spring to:
- * 1. Create instance of return type
- * 2. Manage as singleton in application context
- * 3. Inject into other classes via @Autowired
- * 
- * EXAMPLE:
- * @Bean
- * public RestTemplate restTemplate() {
- *   return new RestTemplate(); // Spring manages this instance
- * }
- * 
- * Usage in other classes:
- * @Autowired
- * private RestTemplate restTemplate; // Spring injects the bean
- */
 public class RedisCacheConfig {
 
-    /** Cache names — used in @Cacheable/@CacheEvict throughout user-service */
+    /** Cache region name for user lookups by email. */
     public static final String USERS_BY_EMAIL_CACHE = "usersByEmail";
+
+    /** Cache region name for user lookups by UUID. */
     public static final String USERS_BY_UUID_CACHE  = "usersByUuid";
 
-    @Bean
     /**
-     * CACHEMANAGER - Method Documentation
+     * Builds and configures the {@link RedisCacheManager} bean.
      *
-     * PURPOSE:
-     * This method handles the cacheManager operation.
+     * <p>The manager is set up with:</p>
+     * <ul>
+     *   <li>String key serialisation</li>
+     *   <li>Jackson-based JSON value serialisation (with Java-time support
+     *       and default typing enabled for polymorphic caching)</li>
+     *   <li>Null-value caching disabled</li>
+     *   <li>15-minute TTL for all cache regions</li>
+     * </ul>
      *
-     * PARAMETERS:
-     * @param factory - RedisConnectionFactory value
-     *
-     * RETURN VALUE:
-     * @return RedisCacheManager - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @Autowired - Applied to this method
-     * @Cacheable - Caches result for performance
-     * @Bean - Applied to this method
-     *
+     * @param factory the {@link RedisConnectionFactory} auto-configured by
+     *                Spring Boot
+     * @return a fully configured {@link RedisCacheManager}
      */
+    @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory factory) {
 
         ObjectMapper om = new ObjectMapper();
@@ -159,7 +85,6 @@ public class RedisCacheConfig {
                                 .fromSerializer(jsonSerializer))
                 .disableCachingNullValues();
 
-        // User lookups cached for 15 minutes (auth-service calls these on every login)
         Map<String, RedisCacheConfiguration> cacheConfigs = new HashMap<>();
         cacheConfigs.put(USERS_BY_EMAIL_CACHE, defaultConfig.entryTtl(Duration.ofMinutes(15)));
         cacheConfigs.put(USERS_BY_UUID_CACHE,  defaultConfig.entryTtl(Duration.ofMinutes(15)));

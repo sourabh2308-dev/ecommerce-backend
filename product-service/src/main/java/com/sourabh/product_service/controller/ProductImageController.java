@@ -11,13 +11,31 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * REST controller for managing product images.
+ * <p>
+ * Sellers can add and remove images for their own products, while the
+ * image listing endpoint is publicly accessible.
+ * </p>
+ *
+ * <p>Base path: {@code /api/product}</p>
+ */
 @RestController
 @RequestMapping("/api/product")
 @RequiredArgsConstructor
 public class ProductImageController {
 
+    /** Service encapsulating product-image business logic. */
     private final ProductImageService imageService;
 
+    /**
+     * Adds a new image to a product.
+     *
+     * @param productUuid UUID of the target product
+     * @param sellerUuid  UUID of the authenticated seller (from gateway header)
+     * @param request     validated payload containing the image URL and metadata
+     * @return the newly created image resource
+     */
     @PostMapping("/{productUuid}/images")
     @PreAuthorize("hasRole('SELLER')")
     public ResponseEntity<ImageResponse> addImage(
@@ -27,11 +45,25 @@ public class ProductImageController {
         return ResponseEntity.ok(imageService.addImage(productUuid, sellerUuid, request));
     }
 
+    /**
+     * Retrieves all images for a product, ordered by display order ascending.
+     *
+     * @param productUuid UUID of the product
+     * @return ordered list of image resources
+     */
     @GetMapping("/{productUuid}/images")
     public ResponseEntity<List<ImageResponse>> getImages(@PathVariable String productUuid) {
         return ResponseEntity.ok(imageService.getImages(productUuid));
     }
 
+    /**
+     * Deletes a specific image from a product.
+     *
+     * @param productUuid UUID of the product
+     * @param imageId     database ID of the image to remove
+     * @param sellerUuid  UUID of the authenticated seller
+     * @return confirmation message
+     */
     @DeleteMapping("/{productUuid}/images/{imageId}")
     @PreAuthorize("hasRole('SELLER')")
     public ResponseEntity<String> deleteImage(

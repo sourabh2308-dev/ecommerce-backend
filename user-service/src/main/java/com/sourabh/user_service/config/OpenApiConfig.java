@@ -7,71 +7,30 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
 
-// Spring Configuration - Defines beans and infrastructure setup
-@Configuration
 /**
- * SPRING CONFIGURATION - Bean Definitions and App Setup
- * 
- * PURPOSE:
- * Defines Spring beans and application-level configuration.
- * Beans are singleton objects managed by Spring IoC container.
- * 
- * COMMON CONFIGURATION TYPES:
- * 
- * 1. FeignConfig:
- *    - Configures Feign client behavior (timeouts, error decoder)
- *    - Sets up request interceptors for adding headers
- * 
- * 2. KafkaConfig:
- *    - Producer: Serialization, acks, retries
- *    - Consumer: Deserialization, group ID, auto-commit
- * 
- * 3. CacheConfig:
- *    - Redis connection settings
- *    - Cache TTL (time-to-live) for @Cacheable
- * 
- * 4. WebConfig:
- *    - CORS mappings
- *    - Message converters (JSON, XML)
- *    - Interceptors
- * 
- * 5. AsyncConfig:
- *    - Thread pool for @Async methods
- *    - Executor configuration
- * 
- * BEAN LIFECYCLE:
- * @Bean annotations tell Spring to:
- * 1. Create instance of return type
- * 2. Manage as singleton in application context
- * 3. Inject into other classes via @Autowired
- * 
- * EXAMPLE:
- * @Bean
- * public RestTemplate restTemplate() {
- *   return new RestTemplate(); // Spring manages this instance
- * }
- * 
- * Usage in other classes:
- * @Autowired
- * private RestTemplate restTemplate; // Spring injects the bean
+ * OpenAPI / Swagger configuration for the user-service.
+ *
+ * <p>Customises the auto-generated OpenAPI specification so that the
+ * Swagger UI "Try it out" feature targets the correct base URL, which is
+ * especially important when the service runs behind the API Gateway or
+ * inside a containerised environment where the public URL differs from
+ * the service's internal address.</p>
+ *
+ * @see <a href="https://springdoc.org/">springdoc-openapi</a>
  */
+@Configuration
 public class OpenApiConfig {
 
-    @Bean
     /**
-     * CUSTOMOPENAPI - Method Documentation
+     * Provides a customised {@link OpenAPI} bean with a root-relative server URL.
      *
-     * PURPOSE:
-     * This method handles the customOpenAPI operation.
+     * <p>Setting the server URL to {@code "/"} ensures that Swagger UI sends
+     * requests to the same host from which the UI was loaded, avoiding
+     * cross-origin issues in local and containerised setups.</p>
      *
-     * RETURN VALUE:
-     * @return OpenAPI - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @Autowired - Applied to this method
-     * @Bean - Applied to this method
-     *
+     * @return the configured {@link OpenAPI} instance
      */
+    @Bean
     public OpenAPI customOpenAPI() {
         Server server = new Server();
         server.setUrl("/");

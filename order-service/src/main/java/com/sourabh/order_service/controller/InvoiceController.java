@@ -10,46 +10,46 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * REST Controller for generating order invoices.
- * 
- * <p>Provides PDF invoice generation for completed orders.
- * Accessible by the buyer, seller, or admin for the specific order.
- * 
- * <p>Invoice includes:
- * <ul>
- *   <li>Order details and items</li>
- *   <li>Pricing breakdown (subtotal, tax, discount, delivery fee)</li>
- *   <li>Buyer and shipping information</li>
- *   <li>Payment status</li>
- * </ul>
- * 
+ * REST controller for generating and distributing order invoices.
+ *
+ * <p>Provides three capabilities:
+ * <ol>
+ *   <li>Download a PDF invoice for a given order (buyer / seller / admin).</li>
+ *   <li>Email the invoice PDF to the buyer via the user-service.</li>
+ *   <li>Internal endpoint for other microservices to fetch raw PDF bytes,
+ *       protected by the {@code X-Internal-Secret} header.</li>
+ * </ol>
+ *
+ * <p>Invoices include the full order breakdown: items, pricing (subtotal, tax,
+ * discount, delivery fee), buyer and shipping information, and payment status.
+ * PDF generation is delegated to {@link InvoiceService}.</p>
+ *
+ * <p>Base path: {@code /api/order}</p>
+ *
  * @author Sourabh
  * @version 1.0
  * @since 2026-02-26
+ * @see InvoiceService
  */
 @RestController
 @RequestMapping("/api/order")
 @RequiredArgsConstructor
 public class InvoiceController {
 
+    /** Service responsible for PDF generation and email dispatch. */
     private final InvoiceService invoiceService;
 
     /**
-     * Generates and downloads a PDF invoice for the specified order.
-     * 
-     * <p>The invoice is generated using iText PDF library and includes
-     * all order details, itemized breakdown, and payment information.
-     * 
-     * <p>Accessible by:
-     * <ul>
-     *   <li>BUYER: who placed the order</li>
-     *   <li>SELLER: who fulfilled the order</li>
-     *   <li>ADMIN: for administrative purposes</li>
-     * </ul>
-     * 
-     * @param orderUuid the UUID of the order
-     * @param httpRequest the HTTP request (for future extensibility)
-     * @return ResponseEntity containing PDF as byte array with appropriate headers
+     * Generates and returns a PDF invoice for the specified order as a
+     * downloadable attachment.
+     *
+     * <p>The response includes {@code Content-Disposition: attachment} so that
+     * browsers prompt a file download.</p>
+     *
+     * @param orderUuid   UUID of the order whose invoice is requested
+     * @param httpRequest the current HTTP request (reserved for future use)
+     * @return {@link ResponseEntity} containing the PDF byte array with
+     *         {@code application/pdf} content type
      */
     @PreAuthorize("hasAnyRole('BUYER', 'SELLER', 'ADMIN')")
     @GetMapping("/{orderUuid}/invoice")
@@ -68,9 +68,14 @@ public class InvoiceController {
     }
 
     /**
-     * Send invoice PDF via email to the buyer.
-     * This triggers internal logic which generates the document and
-     * delegates delivery to the user-service.
+     * Triggers an asynchronous email delivery of the invoice PDF to the
+     * buyer's registered email address.
+     *
+     * <p>The invoice is generated on the fly and forwarded to the
+     * user-service for email dispatch.</p>
+     *
+     * @param orderUuid UUID of the order whose invoice should be emailed
+     * @return {@link ResponseEntity} containing a confirmation message
      */
     @PreAuthorize("hasAnyRole('BUYER','SELLER','ADMIN')")
     @GetMapping("/{orderUuid}/invoice/email")
@@ -80,9 +85,15 @@ public class InvoiceController {
     }
 
     /**
-     * Internal endpoint used by other services to fetch raw PDF bytes.
-     * This bypasses role-based security and is protected only by the
-     * X-Internal-Secret header handled by InternalSecretFilter.
+     * Internal-only endpoint used by other microservices to fetch raw PDF
+     * invoice bytes.
+     *
+     * <p>This endpoint bypasses role-based security and is protected
+     * exclusively by the {@code X-Internal-Secret} header validated by
+     * {@link com.sourabh.order_service.security.InternalSecretInterceptor}.</p>
+     *
+     * @param orderUuid UUID of the order whose invoice is requested
+     * @return {@link ResponseEntity} containing the PDF byte array
      */
     @GetMapping("/internal/{orderUuid}/invoice")
     public ResponseEntity<byte[]> downloadInvoiceInternal(

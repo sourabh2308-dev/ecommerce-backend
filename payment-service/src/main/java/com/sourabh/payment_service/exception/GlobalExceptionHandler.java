@@ -12,123 +12,70 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Centralised exception handler that intercepts all controller-level exceptions
+ * and converts them into a uniform {@link ErrorResponse} JSON envelope.
+ *
+ * <p>Each handler method maps a specific exception type to an appropriate HTTP
+ * status code and machine-readable error code, ensuring that clients never
+ * receive raw stack traces.
+ *
+ * <p><b>Mapping summary:</b>
+ * <ul>
+ *   <li>{@link PaymentException}          → 400 Bad Request</li>
+ *   <li>{@link PaymentAccessException}    → 403 Forbidden</li>
+ *   <li>{@link PaymentNotFoundException}  → 404 Not Found</li>
+ *   <li>{@link MethodArgumentNotValidException} → 400 with field-level details</li>
+ *   <li>Any other {@link Exception}       → 500 Internal Server Error</li>
+ * </ul>
+ */
 @Slf4j
 @RestControllerAdvice
-/**
- * GLOBAL EXCEPTION HANDLER - Centralized Error Response Generator
- * 
- * PURPOSE:
- * Intercepts all exceptions thrown in the application and converts them
- * to standardized JSON error responses. Prevents stack traces from leaking
- * to clients and ensures consistent error format across all endpoints.
- * 
- * ARCHITECTURE:
- * @RestControllerAdvice: Spring AOP that intercepts controller exceptions
- * @ExceptionHandler: Maps specific exception types to handler methods
- * 
- * ERROR RESPONSE FORMAT:
- * {
- *   "timestamp": "2026-02-25T10:30:00",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- * 
- * EXCEPTION MAPPING:
- * - Custom exceptions (NotFoundException, etc.) → Specific HTTP codes
- * - MethodArgumentNotValidException → 400 with validation details
- * - Generic Exception → 500 INTERNAL SERVER ERROR
- * 
- * LOGGING:
- * All exceptions logged at ERROR level for debugging and monitoring.
- * Stack traces captured for server-side analysis.
- */
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(PaymentException.class)
     /**
-     * HANDLEPAYMENT - Method Documentation
+     * Handles generic payment business-rule violations.
      *
-     * PURPOSE:
-     * This method handles the handlePayment operation.
-     *
-     * PARAMETERS:
-     * @param ex - PaymentException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown {@link PaymentException}
+     * @return 400 Bad Request with error details
      */
+    @ExceptionHandler(PaymentException.class)
     public ResponseEntity<ErrorResponse> handlePayment(PaymentException ex) {
         return buildError("PAYMENT_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(PaymentAccessException.class)
     /**
-     * HANDLEACCESS - Method Documentation
+     * Handles access-denied situations (e.g. buyer trying to view another
+     * buyer's payment).
      *
-     * PURPOSE:
-     * This method handles the handleAccess operation.
-     *
-     * PARAMETERS:
-     * @param ex - PaymentAccessException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown {@link PaymentAccessException}
+     * @return 403 Forbidden with error details
      */
+    @ExceptionHandler(PaymentAccessException.class)
     public ResponseEntity<ErrorResponse> handleAccess(PaymentAccessException ex) {
         return buildError("PAYMENT_ACCESS_DENIED", ex.getMessage(), HttpStatus.FORBIDDEN);
     }
 
-    @ExceptionHandler(PaymentNotFoundException.class)
     /**
-     * HANDLENOTFOUND - Method Documentation
+     * Handles cases where a requested payment or order UUID does not exist.
      *
-     * PURPOSE:
-     * This method handles the handleNotFound operation.
-     *
-     * PARAMETERS:
-     * @param ex - PaymentNotFoundException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown {@link PaymentNotFoundException}
+     * @return 404 Not Found with error details
      */
+    @ExceptionHandler(PaymentNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(PaymentNotFoundException ex) {
         return buildError("PAYMENT_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * HANDLEVALIDATION - Method Documentation
+     * Handles bean-validation failures triggered by {@code @Valid} on
+     * controller parameters.  Collects all field errors into the
+     * {@link ErrorResponse#getDetails()} list.
      *
-     * PURPOSE:
-     * This method handles the handleValidation operation.
-     *
-     * PARAMETERS:
-     * @param ex - MethodArgumentNotValidException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the validation exception
+     * @return 400 Bad Request with per-field error messages
      */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<String> errors = ex.getBindingResult()
                 .getAllErrors()
@@ -146,45 +93,27 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(Exception.class)
     /**
-     * HANDLEGENERAL - Method Documentation
+     * Catch-all handler for any unhandled exception, preventing stack-trace
+     * leakage to external clients.
      *
-     * PURPOSE:
-     * This method handles the handleGeneral operation.
-     *
-     * PARAMETERS:
-     * @param ex - Exception value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the unhandled exception
+     * @return 500 Internal Server Error
      */
+    @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneral(Exception ex) {
         log.error("Unhandled exception", ex);
         return buildError("INTERNAL_SERVER_ERROR", "Something went wrong", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     /**
-     * BUILDERROR - Method Documentation
+     * Helper that constructs a standardised {@link ErrorResponse} wrapped in
+     * a {@link ResponseEntity} with the given HTTP status.
      *
-     * PURPOSE:
-     * This method handles the buildError operation.
-     *
-     * PARAMETERS:
-     * @param code - String value
-     * @param message - String value
-     * @param status - HttpStatus value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param code    machine-readable error code
+     * @param message human-readable error description
+     * @param status  HTTP status to return
+     * @return the response entity
      */
     private ResponseEntity<ErrorResponse> buildError(String code, String message, HttpStatus status) {
         return new ResponseEntity<>(

@@ -18,18 +18,58 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
+/**
+ * Kafka consumer that handles {@link PaymentCompletedEvent} messages published
+ * by the payment-service on the {@code payment.completed} topic.
+ *
+ * <p>Responsibilities:
+ * <ol>
+ *   <li>Update the order's payment status (and order status on failure).</li>
+ *   <li>Execute saga compensation (restore product stock) when payment fails.</li>
+ *   <li>Record processed events for idempotent consumption.</li>
+ * </ol>
+ *
+ * <p>Retry policy: up to 3 attempts with exponential back-off (1 s base,
+ * 2× multiplier). Messages that exhaust retries are forwarded to the
+ * dead-letter topic {@code payment.completed.DLT}.</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ * @see PaymentCompletedEvent
+ * @see OrderService#updatePaymentStatus(String, String)
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class PaymentEventConsumer {
 
+    /** Service layer for order business logic. */
     private final OrderService orderService;
+
+    /** Repository for order look-ups during saga compensation. */
     private final OrderRepository orderRepository;
+
+    /** Feign client used to restore product stock on payment failure. */
     private final ProductServiceClient productServiceClient;
+
+    /** Repository for idempotent event tracking. */
     private final ProcessedEventRepository processedEventRepository;
 
+    /** Kafka topic name for payment completion events. */
     private static final String TOPIC_PAYMENT_COMPLETED = "payment.completed";
 
+    /**
+     * Consumes a {@link PaymentCompletedEvent} and updates the corresponding
+     * order's payment status.
+     *
+     * <p>If the payment failed, saga compensation is triggered to restore
+     * product stock. The method is idempotent — duplicate events (identified
+     * by {@code paymentUuid}) are silently skipped.</p>
+     *
+     * @param event the payment completion event containing the order UUID,
+     *              payment UUID, and outcome status
+     */
     @RetryableTopic(
             attempts = "3",
             backoff = @Backoff(delay = 1000, multiplier = 2.0),
@@ -37,99 +77,24 @@ public class PaymentEventConsumer {
             dltTopicSuffix = ".DLT",
             autoCreateTopics = "true"
     )
-    /**
-
-     * KAFKA EVENT CONSUMER - Async Event Processing
-
-     * 
-
-     * PURPOSE:
-
-     * Subscribes to Kafka topic and processes events asynchronously.
-
-     * Part of event-driven architecture for inter-service communication.
-
-     * 
-
-     * HOW IT WORKS:
-
-     * 1. Spring Kafka polls topic for new messages
-
-     * 2. Deserializes JSON to event object
-
-     * 3. Invokes this method in consumer thread pool
-
-     * 4. Acknowledges message on successful processing
-
-     * 5. On exception, retries or sends to DLQ (Dead Letter Queue)
-
-     * 
-
-     * @KafkaListener annotation parameters:
-
-     * - topics: Topic name(s) to subscribe to
-
-     * - groupId: Consumer group (enables load balancing)
-
-     * - containerFactory: Custom config for concurrency, error handling
-
-     * 
-
-     * EVENTUAL CONSISTENCY:
-
-     * Kafka ensures at-least-once delivery. Method must be idempotent
-
-     * (safe to process same event multiple times).
-
-     * 
-
-     * ERROR HANDLING:
-
-     * - Exceptions trigger retry mechanism (configurable retry count)
-
-     * - Failed messages after retries sent to DLQ topic
-
-     * - Use @Transactional to rollback DB changes on error
-
-     */
-
     @KafkaListener(topics = TOPIC_PAYMENT_COMPLETED, groupId = "order-service")
     @Transactional
-    /**
-     * HANDLEPAYMENTCOMPLETED - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the handlePaymentCompleted operation.
-     *
-     * PARAMETERS:
-     * @param event - PaymentCompletedEvent value
-     *
-     * ANNOTATIONS USED:
-     * @Transactional - Wraps in database transaction (atomic execution)
-     * @KafkaListener - Consumes events from Kafka topic
-     * @Transactional - Wraps in database transaction (atomic execution)
-     *
-     */
     public void handlePaymentCompleted(PaymentCompletedEvent event) {
         log.info("Received PaymentCompletedEvent: orderUuid={}, status={}, paymentUuid={}",
                 event.getOrderUuid(), event.getStatus(), event.getPaymentUuid());
 
-        // Idempotency guard — use paymentUuid as deduplication key
         String idempotencyKey = "payment-completed:" + event.getPaymentUuid();
         if (processedEventRepository.existsByEventId(idempotencyKey)) {
             log.warn("Duplicate PaymentCompletedEvent, skipping: paymentUuid={}", event.getPaymentUuid());
             return;
         }
 
-        // Update order payment status (also cancels order if FAILED)
         orderService.updatePaymentStatus(event.getOrderUuid(), event.getStatus());
 
-        // Saga compensation: restore stock if payment failed
         if ("FAILED".equalsIgnoreCase(event.getStatus())) {
             compensateFailedPayment(event.getOrderUuid());
         }
 
-        // Record as processed
         processedEventRepository.save(ProcessedEvent.builder()
                 .eventId(idempotencyKey)
                 .topic(TOPIC_PAYMENT_COMPLETED)
@@ -138,8 +103,15 @@ public class PaymentEventConsumer {
     }
 
     /**
-     * Compensation step: restores product stock after a failed payment.
-     * The order has already been cancelled by {@code updatePaymentStatus}.
+     * Saga compensation step: restores product stock for every item in the
+     * order after a payment failure. The order has already been cancelled by
+     * {@link OrderService#updatePaymentStatus(String, String)}.
+     *
+     * <p>Stock restoration is best-effort — failures are logged but do not
+     * block saga acknowledgement. In production a transactional outbox
+     * pattern would guarantee delivery.</p>
+     *
+     * @param orderUuid UUID of the cancelled order
      */
     private void compensateFailedPayment(String orderUuid) {
         orderRepository.findByUuidAndIsDeletedFalse(orderUuid).ifPresent(order -> {
@@ -153,8 +125,6 @@ public class PaymentEventConsumer {
                     log.info("Stock restored for compensation: productUuid={}, quantity={}",
                             item.getProductUuid(), item.getQuantity());
                 } catch (FeignException e) {
-                    // Log and continue — compensation must not block saga acknowledgment.
-                    // In production, use outbox pattern for guaranteed delivery.
                     log.error("Failed to restore stock for productUuid={}: {}",
                             item.getProductUuid(), e.getMessage());
                 }

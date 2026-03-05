@@ -1,29 +1,23 @@
 package com.sourabh.user_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * Thrown when an operation cannot be performed because the user's current
+ * state does not allow it (e.g. account is suspended, email not verified,
+ * or seller not yet approved).
+ *
+ * <p>Handled by
+ * {@link GlobalExceptionHandler#handleUserState(UserStateException)},
+ * which returns HTTP 409 (Conflict) with error code
+ * {@code USER_STATE_ERROR}.</p>
  */
 public class UserStateException extends RuntimeException {
+
+    /**
+     * Constructs a new {@code UserStateException} with the specified
+     * detail message.
+     *
+     * @param message a description of the invalid state transition
+     */
     public UserStateException(String message) {
         super(message);
     }

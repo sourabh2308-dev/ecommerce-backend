@@ -4,7 +4,6 @@ import com.sourabh.auth_service.common.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -13,123 +12,70 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Centralised exception handler for the auth-service.
+ *
+ * <p>Intercepts exceptions thrown by controllers and services and converts
+ * them into a uniform {@link ErrorResponse} JSON structure.  This prevents
+ * stack traces from leaking to API clients and guarantees a consistent
+ * error format across all endpoints.</p>
+ *
+ * <p>Exception-to-HTTP-status mapping:</p>
+ * <ul>
+ *   <li>{@link AuthException} &rarr; 401 Unauthorized</li>
+ *   <li>{@link UserAccountException} &rarr; 403 Forbidden</li>
+ *   <li>{@link UserNotFoundException} &rarr; 404 Not Found</li>
+ *   <li>{@link MethodArgumentNotValidException} &rarr; 400 Bad Request</li>
+ *   <li>{@link Exception} (catch-all) &rarr; 500 Internal Server Error</li>
+ * </ul>
+ */
 @Slf4j
 @RestControllerAdvice
-/**
- * GLOBAL EXCEPTION HANDLER - Centralized Error Response Generator
- * 
- * PURPOSE:
- * Intercepts all exceptions thrown in the application and converts them
- * to standardized JSON error responses. Prevents stack traces from leaking
- * to clients and ensures consistent error format across all endpoints.
- * 
- * ARCHITECTURE:
- * @RestControllerAdvice: Spring AOP that intercepts controller exceptions
- * @ExceptionHandler: Maps specific exception types to handler methods
- * 
- * ERROR RESPONSE FORMAT:
- * {
- *   "timestamp": "2026-02-25T10:30:00",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- * 
- * EXCEPTION MAPPING:
- * - Custom exceptions (NotFoundException, etc.) → Specific HTTP codes
- * - MethodArgumentNotValidException → 400 with validation details
- * - Generic Exception → 500 INTERNAL SERVER ERROR
- * 
- * LOGGING:
- * All exceptions logged at ERROR level for debugging and monitoring.
- * Stack traces captured for server-side analysis.
- */
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(AuthException.class)
     /**
-     * HANDLEAUTHEXCEPTION - Method Documentation
+     * Handles authentication failures (invalid credentials, token errors).
      *
-     * PURPOSE:
-     * This method handles the handleAuthException operation.
-     *
-     * PARAMETERS:
-     * @param ex - AuthException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown {@link AuthException}
+     * @return 401 Unauthorized with error details
      */
+    @ExceptionHandler(AuthException.class)
     public ResponseEntity<ErrorResponse> handleAuthException(AuthException ex) {
         return buildError("AUTH_ERROR", ex.getMessage(), HttpStatus.UNAUTHORIZED);
     }
 
-    @ExceptionHandler(UserAccountException.class)
     /**
-     * HANDLEUSERACCOUNTEXCEPTION - Method Documentation
+     * Handles user-account state violations (suspended, email not verified).
      *
-     * PURPOSE:
-     * This method handles the handleUserAccountException operation.
-     *
-     * PARAMETERS:
-     * @param ex - UserAccountException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown {@link UserAccountException}
+     * @return 403 Forbidden with error details
      */
+    @ExceptionHandler(UserAccountException.class)
     public ResponseEntity<ErrorResponse> handleUserAccountException(UserAccountException ex) {
         return buildError("USER_ACCOUNT_ERROR", ex.getMessage(), HttpStatus.FORBIDDEN);
     }
 
-    @ExceptionHandler(UserNotFoundException.class)
     /**
-     * HANDLEUSERNOTFOUNDEXCEPTION - Method Documentation
+     * Handles cases where the target user does not exist in
+     * {@code user-service}.
      *
-     * PURPOSE:
-     * This method handles the handleUserNotFoundException operation.
-     *
-     * PARAMETERS:
-     * @param ex - UserNotFoundException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the thrown {@link UserNotFoundException}
+     * @return 404 Not Found with error details
      */
+    @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleUserNotFoundException(UserNotFoundException ex) {
         return buildError("USER_NOT_FOUND", ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * HANDLEVALIDATION - Method Documentation
+     * Handles bean-validation failures triggered by {@code @Valid} on
+     * request DTOs.  Collects per-field error messages and returns them in
+     * the {@code details} list.
      *
-     * PURPOSE:
-     * This method handles the handleValidation operation.
-     *
-     * PARAMETERS:
-     * @param ex - MethodArgumentNotValidException value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the validation exception containing binding results
+     * @return 400 Bad Request with field-level error details
      */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<String> errors = ex.getBindingResult()
                 .getFieldErrors()
@@ -147,45 +93,28 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    @ExceptionHandler(Exception.class)
     /**
-     * HANDLEGENERICEXCEPTION - Method Documentation
+     * Catch-all handler for unexpected exceptions.  Logs the full stack
+     * trace for server-side debugging and returns a generic error message
+     * to the client.
      *
-     * PURPOSE:
-     * This method handles the handleGenericException operation.
-     *
-     * PARAMETERS:
-     * @param ex - Exception value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param ex the unexpected exception
+     * @return 500 Internal Server Error with a generic message
      */
+    @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(Exception ex) {
         log.error("Unexpected error in auth-service: {}", ex.getMessage(), ex);
         return buildError("INTERNAL_SERVER_ERROR", "Something went wrong", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     /**
-     * BUILDERROR - Method Documentation
+     * Builds a standardised {@link ErrorResponse} wrapped in a
+     * {@link ResponseEntity} with the given HTTP status.
      *
-     * PURPOSE:
-     * This method handles the buildError operation.
-     *
-     * PARAMETERS:
-     * @param code - String value
-     * @param message - String value
-     * @param status - HttpStatus value
-     *
-     * RETURN VALUE:
-     * @return ResponseEntity<ErrorResponse> - Result of the operation
-     *
-     * ANNOTATIONS USED:
-     * @ExceptionHandler - Applied to this method
-     *
+     * @param code    application-specific error code
+     * @param message human-readable error description
+     * @param status  HTTP status to return
+     * @return the formatted error response entity
      */
     private ResponseEntity<ErrorResponse> buildError(String code, String message, HttpStatus status) {
         return new ResponseEntity<>(

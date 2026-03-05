@@ -6,43 +6,36 @@ import lombok.Getter;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Standardised error response returned by {@link com.sourabh.user_service.exception.GlobalExceptionHandler}
+ * whenever an exception is raised within the user-service.
+ *
+ * <p>All error responses share this structure so that API clients can rely on
+ * a predictable schema for error handling.</p>
+ *
+ * <p><b>Example JSON:</b></p>
+ * <pre>
+ * {
+ *   "errorCode": "USER_NOT_FOUND",
+ *   "message": "No user with the given UUID",
+ *   "details": null,
+ *   "timestamp": "2026-03-05T12:30:00"
+ * }
+ * </pre>
+ */
 @Getter
 @Builder
-/**
- * DATA TRANSFER OBJECT (DTO) - Server Response Format
- * 
- * Defines the JSON structure returned to HTTP clients.
- * Built from Entity objects via mapper methods.
- * May include computed fields not in database.
- */
-/**
- * ERROR RESPONSE DTO - Standardized Error Format
- * 
- * PURPOSE:
- * Defines the JSON structure for error responses sent to clients.
- * Used by GlobalExceptionHandler to format all error responses consistently.
- * 
- * FIELDS:
- * - timestamp: When the error occurred (ISO-8601 format)
- * - status: HTTP status code (404, 400, 500, etc.)
- * - error: HTTP status reason phrase ("Not Found", "Bad Request")
- * - message: Human-readable error description
- * - path: Request URI that caused the error
- * - errors: (Optional) List of field-level validation errors
- * 
- * EXAMPLE JSON:
- * {
- *   "timestamp": "2026-02-25T10:30:00.123Z",
- *   "status": 404,
- *   "error": "Not Found",
- *   "message": "Order not found: order-123",
- *   "path": "/api/order/order-123"
- * }
- */
 public class ErrorResponse {
 
+    /** Application-specific error code (e.g. {@code USER_NOT_FOUND}, {@code VALIDATION_ERROR}). */
     private String errorCode;
+
+    /** Human-readable description of the error. */
     private String message;
+
+    /** Optional list of field-level validation errors; {@code null} for non-validation errors. */
     private List<String> details;
+
+    /** Server-side timestamp indicating when the error occurred. */
     private LocalDateTime timestamp;
 }

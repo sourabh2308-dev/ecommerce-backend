@@ -1,19 +1,42 @@
-# Shared environment — single source of truth for secrets.
-# Override with a .env file or Docker secrets in production.
+# =============================================================================
+# Docker Compose — E-Commerce Microservices Platform
+# =============================================================================
+# Orchestrates the full stack: infrastructure services (Postgres, Redis, Kafka,
+# Elasticsearch, Zipkin), Spring Cloud services (Eureka, Config Server,
+# API Gateway), domain microservices (Auth, User, Product, Order, Review,
+# Payment), a React/Vite frontend, and observability tooling (Prometheus,
+# Grafana).  The "full" profile gates optional services (frontend, monitoring).
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Shared environment variables — single source of truth for secrets and
+# connection strings.  Override with a .env file or Docker secrets in prod.
+# ---------------------------------------------------------------------------
 x-common-env: &common-env
+  # PostgreSQL credentials shared by all Spring Boot services
   DB_USERNAME: postgres
+  # PostgreSQL password (override via .env in production)
   DB_PASSWORD: postgres
+  # JWT signing key used by auth-service and verified by api-gateway
   JWT_SECRET: mysupersecuresecretkeythatislongenough123
+  # Secret for internal service-to-service authentication
   INTERNAL_SECRET: veryStrongInternalSecret123
+  # Apache Kafka bootstrap address for event-driven messaging
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  # Zipkin endpoint for distributed tracing span export
   ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+  # Eureka service-discovery URL
   EUREKA_URL: http://eureka-server:8761/eureka
+  # Spring Cloud Config Server URL
   CONFIG_SERVER_URL: http://config-server:8888
+  # Redis host and port for caching / token blacklisting
   REDIS_HOST: redis
   REDIS_PORT: 6379
+  # Elasticsearch connection for product search indexing
   ELASTICSEARCH_URIS: http://elasticsearch:9200
+  # JVM tuning: respect container memory limits and use fast entropy source
   JAVA_TOOL_OPTIONS: -XX:+UseContainerSupport -XX:InitialRAMPercentage=5 -XX:MaxRAMPercentage=50 -Djava.security.egd=file:/dev/./urandom
-  # ─── SMTP / Email (set real values in .env or override per-service) ───
+  # SMTP / Email settings — set real values in .env or per-service overrides
   MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
   MAIL_PORT: ${MAIL_PORT:-587}
   MAIL_USERNAME: ${MAIL_USERNAME:-}
@@ -21,15 +44,25 @@ x-common-env: &common-env
   MAIL_FROM: ${MAIL_FROM:-noreply@ecommerce.com}
   MAIL_FROM_NAME: ${MAIL_FROM_NAME:-E-Commerce Platform}
 
-# Shared logging configuration to prevent disk space issues
+# ---------------------------------------------------------------------------
+# Shared logging configuration — constrains log file sizes to prevent
+# unbounded disk usage on long-running containers.
+# ---------------------------------------------------------------------------
 x-logging: &default-logging
   driver: "json-file"
   options:
     max-size: "10m"
     max-file: "3"
 
+# ===========================================================================
+#  SERVICES
+# ===========================================================================
 services:
 
+  # -------------------------------------------------------------------------
+  # PostgreSQL 15 — relational database shared by most microservices.
+  # Each service uses its own database created by init.sql.
+  # -------------------------------------------------------------------------
   postgres:
     image: postgres:15
     mem_limit: 384m
@@ -40,7 +73,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # Persist data across container restarts
       - pgdata:/var/lib/postgresql/data
+      # Seed script: creates per-service databases on first run
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -49,6 +84,10 @@ services:
       retries: 5
       start_period: 10s
 
+  # -------------------------------------------------------------------------
+  # Redis 7 — in-memory store used for caching, rate-limiting, and
+  # JWT token blacklisting.
+  # -------------------------------------------------------------------------
   redis:
     image: redis:7
     mem_limit: 96m
@@ -62,13 +101,20 @@ services:
       retries: 5
       start_period: 5s
 
+  # -------------------------------------------------------------------------
+  # Elasticsearch 8 — full-text search engine for the product catalog.
+  # Security is disabled for local development (xpack.security.enabled=false).
+  # -------------------------------------------------------------------------
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
     mem_limit: 768m
     logging: *default-logging
     environment:
+      # Run as a single-node cluster (no master election needed)
       discovery.type: single-node
+      # Disable X-Pack security for local development convenience
       xpack.security.enabled: "false"
+      # Constrain JVM heap within the container memory limit
       ES_JAVA_OPTS: "-Xms256m -Xmx256m"
     ports:
       - "9200:9200"
@@ -79,23 +125,34 @@ services:
       retries: 10
       start_period: 60s
 
+  # -------------------------------------------------------------------------
+  # Apache Kafka (KRaft mode) — event streaming platform for async
+  # communication between microservices (order events, inventory updates,
+  # review notifications, etc.).
+  # -------------------------------------------------------------------------
   kafka:
     image: apache/kafka:3.7.0
     mem_limit: 512m
     logging: *default-logging
     environment:
       KAFKA_NODE_ID: 1
+      # Combined broker + controller in KRaft mode (no ZooKeeper)
       KAFKA_PROCESS_ROLES: broker,controller
+      # Internal, controller, and external listener definitions
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Single-node: replication factor of 1 is sufficient
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Static cluster ID for KRaft mode
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      # Constrain JVM heap to stay within container memory
       KAFKA_HEAP_OPTS: -Xms64m -Xmx256m
     ports:
+      # Expose the host-accessible listener for local development tools
       - "29092:29092"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
@@ -104,6 +161,10 @@ services:
       retries: 5
       start_period: 30s
 
+  # -------------------------------------------------------------------------
+  # Zipkin — distributed tracing backend.  All Spring Boot services export
+  # trace spans here for request-flow visualisation.
+  # -------------------------------------------------------------------------
   zipkin:
     image: openzipkin/zipkin:3
     mem_limit: 256m
@@ -118,6 +179,15 @@ services:
       retries: 5
       start_period: 10s
 
+  # =========================================================================
+  #  SPRING CLOUD INFRASTRUCTURE
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
+  # Eureka Server — Netflix service registry.  Every microservice registers
+  # itself here so that the API Gateway and inter-service calls can discover
+  # endpoints dynamically.
+  # -------------------------------------------------------------------------
   eureka-server:
     build:
       context: .
@@ -135,6 +205,10 @@ services:
       retries: 5
       start_period: 30s
 
+  # -------------------------------------------------------------------------
+  # Config Server — centralised externalized configuration for all
+  # microservices.  Services fetch their application.yml at startup.
+  # -------------------------------------------------------------------------
   config-server:
     build:
       context: .
@@ -155,6 +229,14 @@ services:
       retries: 5
       start_period: 30s
 
+  # =========================================================================
+  #  DOMAIN MICROSERVICES
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
+  # Auth Service — handles user registration, login, JWT issuance / refresh,
+  # password reset, and token blacklisting via Redis.
+  # -------------------------------------------------------------------------
   auth-service:
     build:
       context: .
@@ -175,6 +257,9 @@ services:
       config-server:
         condition: service_healthy
 
+  # -------------------------------------------------------------------------
+  # User Service — manages user profiles, addresses, and account settings.
+  # -------------------------------------------------------------------------
   user-service:
     build:
       context: .
@@ -195,6 +280,10 @@ services:
       config-server:
         condition: service_healthy
 
+  # -------------------------------------------------------------------------
+  # Product Service — product catalog CRUD, category management, and
+  # full-text search via Elasticsearch.  Publishes inventory events to Kafka.
+  # -------------------------------------------------------------------------
   product-service:
     build:
       context: .
@@ -217,6 +306,11 @@ services:
       config-server:
         condition: service_healthy
 
+  # -------------------------------------------------------------------------
+  # Order Service — order placement, status tracking, and order-item
+  # management.  Communicates with Payment and Product services via Kafka.
+  # Restarts automatically on failure.
+  # -------------------------------------------------------------------------
   order-service:
     build:
       context: .
@@ -238,6 +332,10 @@ services:
       config-server:
         condition: service_healthy
 
+  # -------------------------------------------------------------------------
+  # Review Service — product reviews and ratings submitted by customers.
+  # Consumes Kafka events for order-completion triggers.
+  # -------------------------------------------------------------------------
   review-service:
     build:
       context: .
@@ -258,6 +356,10 @@ services:
       config-server:
         condition: service_healthy
 
+  # -------------------------------------------------------------------------
+  # Payment Service — integrates with Razorpay for payment processing.
+  # Publishes payment-result events to Kafka for order-status updates.
+  # -------------------------------------------------------------------------
   payment-service:
     build:
       context: .
@@ -265,6 +367,10 @@ services:
     logging: *default-logging
     environment:
       <<: *common-env
+      # Payment gateway selection and credentials (override in .env)
+      PAYMENT_GATEWAY: razorpay
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
     mem_limit: 384m
     depends_on:
       postgres:
@@ -278,12 +384,22 @@ services:
       config-server:
         condition: service_healthy
 
+  # =========================================================================
+  #  EDGE / GATEWAY
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
+  # API Gateway — Spring Cloud Gateway that routes external HTTP traffic
+  # to internal microservices.  Performs JWT validation, rate limiting
+  # (via Redis), and request logging.
+  # -------------------------------------------------------------------------
   api-gateway:
     build:
       context: .
       dockerfile: ./api-gateway/dockerfile
     logging: *default-logging
     ports:
+      # Single external entry point for all API calls
       - "8080:8080"
     mem_limit: 384m
     environment:
@@ -308,8 +424,20 @@ services:
       config-server:
         condition: service_healthy
 
+  # =========================================================================
+  #  FRONTEND  (profile: full)
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
+  # React/Vite SPA served by Nginx.  Only starts when the "full" profile
+  # is active (docker compose --profile full up).
+  # -------------------------------------------------------------------------
   frontend:
-    build: ./ecommerce-frontend
+    build:
+      context: ./ecommerce-frontend
+      args:
+        # Razorpay public key baked into the frontend at build time
+        VITE_RAZORPAY_KEY: ${RAZORPAY_KEY_ID:-}
     mem_limit: 192m
     logging: *default-logging
     profiles: ["full"]
@@ -318,6 +446,14 @@ services:
     depends_on:
       - api-gateway
 
+  # =========================================================================
+  #  OBSERVABILITY  (profile: full)
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
+  # Prometheus — metrics collection.  Scrapes /actuator/prometheus on every
+  # Spring Boot service.  Configuration is in prometheus.yml.
+  # -------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v2.51.0
     mem_limit: 256m
@@ -326,7 +462,9 @@ services:
     ports:
       - "9090:9090"
     volumes:
+      # Mount scrape configuration (read-only)
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Persist time-series data across restarts
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -335,6 +473,10 @@ services:
     depends_on:
       - api-gateway
 
+  # -------------------------------------------------------------------------
+  # Grafana — dashboarding and alerting UI.  Pre-provisioned datasources
+  # and dashboards are mounted from grafana/provisioning/.
+  # -------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:10.4.0
     mem_limit: 256m
@@ -343,18 +485,28 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Default admin credentials (change in production)
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+      # Disable public sign-up
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
+      # Persist dashboards and settings
       - grafana_data:/var/lib/grafana
+      # Auto-provision datasources and dashboards on first start
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
 
 
+# ===========================================================================
+#  NAMED VOLUMES
+# ===========================================================================
 volumes:
+  # PostgreSQL persistent data
   pgdata:
+  # Prometheus time-series database
   prometheus_data:
+  # Grafana dashboards and configuration
   grafana_data:
 

@@ -7,82 +7,34 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * MVC interceptor registration.
+ * Spring MVC configuration for the user-service.
  *
- * InternalSecretInterceptor is intentionally removed — its function is
- * covered by InternalSecretFilter (a servlet filter that runs before Spring
- * Security and applies to all request paths).
+ * <p>Registers application-level {@link org.springframework.web.servlet.HandlerInterceptor}
+ * instances that execute around controller method invocations. The
+ * {@link RoleInterceptor} is added here to enforce fine-grained role
+ * checks on selected endpoints.</p>
+ *
+ * <p><b>Note:</b> The {@code InternalSecretFilter} functionality is
+ * handled as a servlet filter (not an interceptor) so that it runs
+ * before the Spring Security filter chain.</p>
+ *
+ * @see RoleInterceptor
  */
-// Spring Configuration - Defines beans and infrastructure setup
 @Configuration
 @RequiredArgsConstructor
-/**
- * SPRING CONFIGURATION - Bean Definitions and App Setup
- * 
- * PURPOSE:
- * Defines Spring beans and application-level configuration.
- * Beans are singleton objects managed by Spring IoC container.
- * 
- * COMMON CONFIGURATION TYPES:
- * 
- * 1. FeignConfig:
- *    - Configures Feign client behavior (timeouts, error decoder)
- *    - Sets up request interceptors for adding headers
- * 
- * 2. KafkaConfig:
- *    - Producer: Serialization, acks, retries
- *    - Consumer: Deserialization, group ID, auto-commit
- * 
- * 3. CacheConfig:
- *    - Redis connection settings
- *    - Cache TTL (time-to-live) for @Cacheable
- * 
- * 4. WebConfig:
- *    - CORS mappings
- *    - Message converters (JSON, XML)
- *    - Interceptors
- * 
- * 5. AsyncConfig:
- *    - Thread pool for @Async methods
- *    - Executor configuration
- * 
- * BEAN LIFECYCLE:
- * @Bean annotations tell Spring to:
- * 1. Create instance of return type
- * 2. Manage as singleton in application context
- * 3. Inject into other classes via @Autowired
- * 
- * EXAMPLE:
- * @Bean
- * public RestTemplate restTemplate() {
- *   return new RestTemplate(); // Spring manages this instance
- * }
- * 
- * Usage in other classes:
- * @Autowired
- * private RestTemplate restTemplate; // Spring injects the bean
- */
 public class WebConfig implements WebMvcConfigurer {
 
+    /** Interceptor that validates role-based access on annotated handler methods. */
     private final RoleInterceptor roleInterceptor;
 
-    @Override
     /**
-     * ADDINTERCEPTORS - Method Documentation
+     * Registers the {@link RoleInterceptor} with the Spring MVC interceptor
+     * registry so that it is applied to all incoming requests.
      *
-     * PURPOSE:
-     * This method handles the addInterceptors operation.
-     *
-     * PARAMETERS:
-     * @param registry - InterceptorRegistry value
-     *
-     * ANNOTATIONS USED:
-     * @Autowired - Applied to this method
-     * @Override - Implements interface method
-     *
+     * @param registry the {@link InterceptorRegistry} provided by the framework
      */
+    @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(roleInterceptor);
     }
 }
-

@@ -18,14 +18,35 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Implementation of {@link InventoryService} providing stock management
+ * and movement-audit capabilities.
+ *
+ * <p>All stock mutations (restock, adjustment) are persisted alongside a
+ * {@link StockMovement} record so that a full audit trail of inventory
+ * changes is available. Methods enforce seller ownership before allowing
+ * any modification.</p>
+ *
+ * @see InventoryService
+ * @see StockMovementRepository
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
 
+    /** Repository for product entity operations. */
     private final ProductRepository productRepository;
+
+    /** Repository for stock-movement audit records. */
     private final StockMovementRepository stockMovementRepository;
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Adds the requested quantity to the current stock and persists
+     * a RESTOCK movement entry.</p>
+     */
     @Override
     @Transactional
     public String restock(String productUuid, String sellerUuid, StockUpdateRequest request) {
@@ -41,6 +62,12 @@ public class InventoryServiceImpl implements InventoryService {
         return "Stock updated to " + newStock;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Overwrites the current stock with the quantity from the request
+     * and records an ADJUSTMENT movement.</p>
+     */
     @Override
     @Transactional
     public String adjustStock(String productUuid, String sellerUuid, StockUpdateRequest request) {
@@ -55,6 +82,12 @@ public class InventoryServiceImpl implements InventoryService {
         return "Stock adjusted to " + request.getQuantity();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Returns a paginated view of {@link StockMovement} records for the
+     * given product, ordered by creation date descending.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResponse<StockMovementResponse> getStockHistory(String productUuid, int page, int size) {
@@ -83,6 +116,12 @@ public class InventoryServiceImpl implements InventoryService {
                 .build();
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Streams the seller's non-deleted products and filters for those
+     * whose stock is at or below the given threshold.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public List<String> getLowStockProducts(String sellerUuid, int threshold) {
@@ -92,8 +131,15 @@ public class InventoryServiceImpl implements InventoryService {
                 .toList();
     }
 
-    // ───────────────────────── Helpers ─────────────────────────
-
+    /**
+     * Fetches a product by UUID and verifies that the requesting seller owns it.
+     *
+     * @param productUuid the UUID of the product
+     * @param sellerUuid  the UUID of the seller
+     * @return the validated {@link Product}
+     * @throws ProductNotFoundException if the product does not exist
+     * @throws RuntimeException         if the seller is not the product owner
+     */
     private Product findProductBySeller(String productUuid, String sellerUuid) {
         Product product = productRepository.findByUuidAndIsDeletedFalse(productUuid)
                 .orElseThrow(() -> new ProductNotFoundException("Product not found: " + productUuid));
@@ -103,6 +149,15 @@ public class InventoryServiceImpl implements InventoryService {
         return product;
     }
 
+    /**
+     * Persists a {@link StockMovement} audit record.
+     *
+     * @param productUuid the UUID of the affected product
+     * @param type        the movement type (RESTOCK, ADJUSTMENT, etc.)
+     * @param quantity    the quantity involved in this movement
+     * @param stockAfter  the stock level after the movement
+     * @param reference   an optional external reference (e.g. order ID)
+     */
     private void recordMovement(String productUuid, StockMovement.MovementType type,
                                 int quantity, int stockAfter, String reference) {
         stockMovementRepository.save(StockMovement.builder()

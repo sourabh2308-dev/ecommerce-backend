@@ -1,2 +1,19 @@
--- auth-service: unified schema for JPA auto-creation
--- This file is for documentation only; JPA will create the schema.
+-- ──────────────────────────────────────────────────────────────
+-- Auth Service – Database Schema Reference
+-- ──────────────────────────────────────────────────────────────
+-- This file is for documentation only.  JPA/Hibernate creates
+-- and validates the schema at startup based on @Entity
+-- annotations (ddl-auto=validate in production, create-drop in
+-- tests).
+--
+-- Table: refresh_token
+-- ┌──────────────┬──────────────┬─────────────────────────────┐
+-- │ Column       │ Type         │ Description                 │
+-- ├──────────────┼──────────────┼─────────────────────────────┤
+-- │ id           │ BIGSERIAL    │ Auto-generated primary key  │
+-- │ token        │ VARCHAR(255) │ Unique UUID token value     │
+-- │ user_uuid    │ VARCHAR(255) │ UUID of the owning user     │
+-- │ expiry_date  │ TIMESTAMP    │ When the token expires      │
+-- │ revoked      │ BOOLEAN      │ Whether token is revoked    │
+-- └──────────────┴──────────────┴─────────────────────────────┘
+-- ──────────────────────────────────────────────────────────────

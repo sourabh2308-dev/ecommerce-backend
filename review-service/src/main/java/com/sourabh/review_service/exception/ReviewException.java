@@ -1,28 +1,29 @@
 package com.sourabh.review_service.exception;
 
-// Custom Exception - Domain-specific error handling
 /**
- * CUSTOM EXCEPTION - Business Logic Error Handler
- * 
- * PURPOSE:
- * Represents a specific error condition in business logic.
- * Thrown when validation fails or business rules are violated.
- * 
- * FLOW:
- * 1. Service layer detects invalid state/input
- * 2. Throws this exception with descriptive message
- * 3. GlobalExceptionHandler catches it
- * 4. Converts to HTTP response with appropriate status code
- * 
- * HTTP STATUS MAPPING:
- * - NotFoundException → 404 NOT FOUND
- * - AccessException → 403 FORBIDDEN
- * - StateException → 400 BAD REQUEST
- * - ValidationException → 400 BAD REQUEST
- * 
- * EXAMPLE USAGE:
- * throw new OrderNotFoundException("Order not found: " + uuid);
+ * General-purpose exception for review business-rule violations that do
+ * not fit into more specific categories.
+ *
+ * <p>Common scenarios:
+ * <ul>
+ *   <li>The referenced order has not been delivered yet.</li>
+ *   <li>The product UUID is not part of the referenced order.</li>
+ *   <li>The order-service is unavailable (circuit-breaker fallback).</li>
+ *   <li>Maximum image limit per review exceeded.</li>
+ * </ul>
+ *
+ * <p>Caught by
+ * {@link GlobalExceptionHandler#handleReviewException(ReviewException)}
+ * and mapped to HTTP {@code 400 Bad Request}.
+ *
+ * @see GlobalExceptionHandler
  */
 public class ReviewException extends RuntimeException {
+
+    /**
+     * Constructs a new {@code ReviewException} with the given detail message.
+     *
+     * @param message human-readable description of the business-rule violation
+     */
     public ReviewException(String message) { super(message); }
 }

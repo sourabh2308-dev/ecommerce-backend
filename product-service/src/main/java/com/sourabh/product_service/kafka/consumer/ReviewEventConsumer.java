@@ -7,119 +7,39 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+/**
+ * Kafka consumer that listens for review-related events published by the
+ * review-service and updates product rating aggregates accordingly.
+ * <p>
+ * Subscribes to the {@code review.submitted} topic within the
+ * {@code product-service} consumer group. When a {@link ReviewSubmittedEvent}
+ * is received, the consumer delegates to {@link ProductService#updateRating}
+ * to recalculate the product's average rating and total review count.
+ * </p>
+ * <p>
+ * The consumer must be idempotent because Kafka guarantees at-least-once
+ * delivery—duplicate events may be delivered after retries or rebalances.
+ * </p>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-/**
- * KAFKA CONSUMER - Event Listener for Event-Driven Processing
- * 
- * Listens to Kafka topics and processes events from other services.
- * Enables cross-service communication without direct HTTP calls.
- * @KafkaListener: Spring automatically subscribes to topic on startup.
- */
 public class ReviewEventConsumer {
 
+    /** Product service used to persist updated rating aggregates. */
     private final ProductService productService;
 
     /**
-
-
-     * KAFKA EVENT CONSUMER - Async Event Processing
-
-
-     * 
-
-
-     * PURPOSE:
-
-
-     * Subscribes to Kafka topic and processes events asynchronously.
-
-
-     * Part of event-driven architecture for inter-service communication.
-
-
-     * 
-
-
-     * HOW IT WORKS:
-
-
-     * 1. Spring Kafka polls topic for new messages
-
-
-     * 2. Deserializes JSON to event object
-
-
-     * 3. Invokes this method in consumer thread pool
-
-
-     * 4. Acknowledges message on successful processing
-
-
-     * 5. On exception, retries or sends to DLQ (Dead Letter Queue)
-
-
-     * 
-
-
-     * @KafkaListener annotation parameters:
-
-
-     * - topics: Topic name(s) to subscribe to
-
-
-     * - groupId: Consumer group (enables load balancing)
-
-
-     * - containerFactory: Custom config for concurrency, error handling
-
-
-     * 
-
-
-     * EVENTUAL CONSISTENCY:
-
-
-     * Kafka ensures at-least-once delivery. Method must be idempotent
-
-
-     * (safe to process same event multiple times).
-
-
-     * 
-
-
-     * ERROR HANDLING:
-
-
-     * - Exceptions trigger retry mechanism (configurable retry count)
-
-
-     * - Failed messages after retries sent to DLQ topic
-
-
-     * - Use @Transactional to rollback DB changes on error
-
-
+     * Handles an incoming {@link ReviewSubmittedEvent} from the
+     * {@code review.submitted} Kafka topic.
+     * <p>
+     * Extracts the product UUID and rating from the event and updates
+     * the product's average rating. Processing is logged for observability.
+     * </p>
+     *
+     * @param event the deserialized review submission event
      */
-
-
     @KafkaListener(topics = "review.submitted", groupId = "product-service")
-    /**
-     * HANDLEREVIEWSUBMITTED - Method Documentation
-     *
-     * PURPOSE:
-     * This method handles the handleReviewSubmitted operation.
-     *
-     * PARAMETERS:
-     * @param event - ReviewSubmittedEvent value
-     *
-     * ANNOTATIONS USED:
-     * @Transactional - Wraps in database transaction (atomic execution)
-     * @KafkaListener - Consumes events from Kafka topic
-     *
-     */
     public void handleReviewSubmitted(ReviewSubmittedEvent event) {
         log.info("Received ReviewSubmittedEvent: productUuid={}, rating={}",
                 event.getProductUuid(), event.getRating());

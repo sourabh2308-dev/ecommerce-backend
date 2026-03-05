@@ -4,47 +4,19 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Request payload for verifying a One-Time Password (OTP) sent to
+ * the user's email during registration or password-reset flows.
+ */
 @Getter
 @Setter
-/**
- * DATA TRANSFER OBJECT (DTO) - Client Request Format
- * 
- * Defines the JSON structure expected from HTTP clients.
- * @NotNull/@NotBlank: Validation constraints (checked by @Valid)
- * 
- * Separation of concerns:
- *   - Entity: Database representation
- *   - Request DTO: HTTP request format (may differ from Entity)
- *   - Response DTO: HTTP response format
- */
 public class VerifyOTPRequest {
 
-    /**
-
-
-     * VALIDATION: This field is required and cannot be blank.
-
-
-     * @NotBlank checks: not null, not empty string, not whitespace-only.
-
-
-     * Triggers MethodArgumentNotValidException if violated (returns 400 Bad Request).
-
-
-     */
-
-
+    /** Email address that the OTP was delivered to. */
     @NotBlank
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String email;
 
+    /** The OTP code entered by the user. */
     @NotBlank
-    // Validation constraint
-    // @NotBlank - Validates input before processing
-    // Validation constraint
-    // @NotBlank - Validates input before processing
     private String otpCode;
 }

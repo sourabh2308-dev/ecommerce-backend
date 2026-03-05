@@ -14,37 +14,39 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * REST Controller for managing discount coupons.
- * 
- * <p>Provides endpoints for:
- * <ul>
- *   <li>Creating coupons (ADMIN/SELLER)</li>
- *   <li>Validating coupons before order placement (BUYER)</li>
- *   <li>Listing all coupons (ADMIN)</li>
- *   <li>Deactivating coupons (ADMIN)</li>
- * </ul>
- * 
- * <p>Coupons can be of type PERCENTAGE or FLAT and may have usage limits,
- * minimum order amounts, and validity periods.
- * 
+ * REST controller for managing promotional discount coupons.
+ *
+ * <p>Supports the full coupon lifecycle: creation (admin/seller), validation
+ * at checkout (buyer), retrieval of all coupons (admin), and deactivation
+ * (admin). Coupons may be {@code PERCENTAGE}-based or {@code FLAT}-amount
+ * and can be constrained by usage limits, minimum order amounts, and
+ * validity periods.</p>
+ *
+ * <p>Base path: {@code /api/order/coupons}</p>
+ *
  * @author Sourabh
  * @version 1.0
  * @since 2026-02-26
+ * @see CouponService
+ * @see com.sourabh.order_service.entity.Coupon
  */
 @RestController
 @RequestMapping("/api/order/coupons")
 @RequiredArgsConstructor
 public class CouponController {
 
+    /** Service encapsulating coupon business logic. */
     private final CouponService couponService;
 
     /**
      * Creates a new coupon.
-     * 
-     * <p>Admins can create global coupons; sellers can create seller-specific coupons.
-     * 
-     * @param request the coupon creation request containing code, discount details, and validity
-     * @return ResponseEntity containing the created coupon details
+     *
+     * <p>Admins may create global coupons; sellers may create coupons scoped
+     * to their own products.</p>
+     *
+     * @param request validated coupon creation payload containing code,
+     *                discount details, limits, and validity window
+     * @return {@link ResponseEntity} containing the persisted {@link CouponResponse}
      */
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN','SELLER')")
@@ -53,20 +55,19 @@ public class CouponController {
     }
 
     /**
-     * Validates a coupon code for a specific order amount.
-     * 
-     * <p>Checks if the coupon:
-     * <ul>
-     *   <li>Exists and is active</li>
-     *   <li>Is within validity period</li>
-     *   <li>Meets minimum order amount requirement</li>
-     *   <li>Has not exceeded usage limits (global and per-user)</li>
-     * </ul>
-     * 
-     * @param buyerUuid the UUID of the buyer applying the coupon
-     * @param code the coupon code to validate
-     * @param orderAmount the total order amount before discount
-     * @return ResponseEntity with validation result and calculated discount
+     * Validates a coupon code against a given order amount for the
+     * authenticated buyer.
+     *
+     * <p>The validation checks whether the coupon exists and is active, falls
+     * within its validity window, meets the minimum order amount requirement,
+     * and has not exceeded its global or per-user usage limits.</p>
+     *
+     * @param buyerUuid   UUID of the buyer, injected from the
+     *                    {@code X-User-UUID} request header
+     * @param code        the coupon code to validate
+     * @param orderAmount the current order subtotal before discount
+     * @return {@link ResponseEntity} containing validation result and the
+     *         calculated discount
      */
     @PostMapping("/validate")
     @PreAuthorize("hasRole('BUYER')")
@@ -78,11 +79,10 @@ public class CouponController {
     }
 
     /**
-     * Retrieves all coupons in the system.
-     * 
-     * <p>Admin-only endpoint for viewing all coupons including inactive ones.
-     * 
-     * @return ResponseEntity containing list of all coupons
+     * Lists every coupon in the system, including inactive ones.
+     *
+     * @return {@link ResponseEntity} containing a list of all
+     *         {@link CouponResponse} objects
      */
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
@@ -92,12 +92,13 @@ public class CouponController {
 
     /**
      * Deactivates a coupon by its code.
-     * 
-     * <p>Sets the coupon's isActive flag to false, preventing further usage.
-     * Does not delete the coupon to maintain historical records.
-     * 
+     *
+     * <p>Sets the coupon's {@code isActive} flag to {@code false}, preventing
+     * any further redemptions. The coupon record is retained for historical
+     * and audit purposes.</p>
+     *
      * @param code the coupon code to deactivate
-     * @return ResponseEntity with success message
+     * @return {@link ResponseEntity} containing a confirmation message
      */
     @DeleteMapping("/{code}")
     @PreAuthorize("hasRole('ADMIN')")

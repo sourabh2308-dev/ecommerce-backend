@@ -11,28 +11,39 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-@Component
-// HTTP Filter - Intercepts requests for cross-cutting concerns
 /**
- * HTTP FILTER - Request/Response Interceptor
- * 
- * Intercepts every HTTP request/response for cross-cutting concerns:
- *   - JWT validation
- *   - Header injection
- *   - Request/response logging
- *   - Rate limiting
- * 
- * Executes before controller and after response generation.
+ * Servlet filter that validates inter-service requests by inspecting the
+ * {@code X-Internal-Secret} header.
+ *
+ * <p>Every inbound request must carry an {@code X-Internal-Secret} header
+ * whose value matches the configured {@code internal.secret} property
+ * (typically injected from environment variables or a config server).
+ * Requests with a missing or incorrect secret are rejected immediately
+ * with HTTP {@code 403 Forbidden}.
+ *
+ * <p>This filter extends {@link OncePerRequestFilter} to guarantee a
+ * single execution per request even when the request is forwarded
+ * internally.
+ *
+ * @see SecurityConfig
  */
+@Component
 public class InternalSecretFilter extends OncePerRequestFilter {
 
+    /** Shared secret expected in the {@code X-Internal-Secret} request header. */
     @Value("${internal.secret}")
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
-    // Dependency injected by Spring container
-    // @Value - Automatic dependency injection at runtime
     private String internalSecret;
 
+    /**
+     * Validates the {@code X-Internal-Secret} header and either continues the
+     * filter chain or short-circuits with a {@code 403} response.
+     *
+     * @param request     the incoming HTTP request
+     * @param response    the outgoing HTTP response
+     * @param filterChain the remaining filter chain to invoke on success
+     * @throws ServletException if a servlet error occurs
+     * @throws IOException      if an I/O error occurs
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,

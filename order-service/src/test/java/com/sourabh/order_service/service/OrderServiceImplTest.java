@@ -30,22 +30,51 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+/**
+ * Unit tests for {@link OrderServiceImpl} covering order creation, retrieval,
+ * status transitions (buyer cancel, admin/seller advances), and payment-status
+ * updates.
+ *
+ * <p>All external dependencies (repository, Feign client, Kafka template,
+ * notification publisher, order splitter) are replaced with Mockito mocks so
+ * tests execute in-memory without infrastructure.</p>
+ *
+ * @author Sourabh
+ * @version 1.0
+ * @since 2026-02-26
+ */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("OrderServiceImpl Unit Tests")
 class OrderServiceImplTest {
 
+    /** Mocked persistence layer for order entities. */
     @Mock private OrderRepository orderRepository;
+
+    /** Mocked Feign client used for product lookups and stock operations. */
     @Mock private ProductServiceClient productServiceClient;
+
+    /** Mocked Kafka template for publishing order-created events. */
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+
+    /** Mocked splitter service used to detect multi-seller orders. */
     @Mock private com.sourabh.order_service.service.OrderSplitterService orderSplitterService;
+
+    /** Mocked publisher for order status-change notification events. */
     @Mock private com.sourabh.order_service.kafka.OrderNotificationPublisher notificationPublisher;
 
+    /** Service under test with all mocks injected. */
     @InjectMocks
     private OrderServiceImpl orderService;
 
+    /** An ACTIVE product fixture returned by the mocked product client. */
     private ProductDto activeProduct;
+
+    /** A minimal order fixture in CREATED / PENDING state. */
     private Order sampleOrder;
 
+    /**
+     * Initialises reusable test fixtures before every test method.
+     */
     @BeforeEach
     void setUp() {
         activeProduct = new ProductDto();
@@ -65,10 +94,11 @@ class OrderServiceImplTest {
                 .build();
     }
 
-    // ──────────────────────────────────────────────────────
-    // createOrder
-    // ──────────────────────────────────────────────────────
+    // ── createOrder ─────────────────────────────────────────────────────────
 
+    /**
+     * Helper that builds an {@link OrderItemRequest} for the given product and quantity.
+     */
     private OrderItemRequest makeItem(String productUuid, int quantity) {
         OrderItemRequest item = new OrderItemRequest();
         item.setProductUuid(productUuid);
@@ -76,6 +106,7 @@ class OrderServiceImplTest {
         return item;
     }
 
+    /** Verifies a buyer can successfully create an order with a valid product. */
     @Test
     @DisplayName("createOrder: success — buyer creates valid order")
     void createOrder_success() {
@@ -92,6 +123,7 @@ class OrderServiceImplTest {
         verify(orderRepository).save(any(Order.class));
     }
 
+    /** Confirms non-BUYER roles are rejected with {@link OrderAccessException}. */
     @Test
     @DisplayName("createOrder: fails — non-buyer role rejected")
     void createOrder_nonBuyer_throwsOrderAccessException() {
@@ -105,6 +137,7 @@ class OrderServiceImplTest {
         verifyNoInteractions(productServiceClient, orderRepository);
     }
 
+    /** Ensures inactive products trigger an {@link OrderStateException}. */
     @Test
     @DisplayName("createOrder: fails — product is not ACTIVE")
     void createOrder_inactiveProduct_throwsOrderStateException() {
@@ -121,10 +154,9 @@ class OrderServiceImplTest {
         verify(orderRepository, never()).save(any());
     }
 
-    // ──────────────────────────────────────────────────────
-    // getOrderByUuid
-    // ──────────────────────────────────────────────────────
+    // ── getOrderByUuid ──────────────────────────────────────────────────────
 
+    /** Happy path: returns a mapped response when the order exists. */
     @Test
     @DisplayName("getOrderByUuid: returns order when found")
     void getOrderByUuid_found() {
@@ -136,6 +168,7 @@ class OrderServiceImplTest {
         assertThat(response.getUuid()).isEqualTo("order-uuid");
     }
 
+    /** Confirms {@link OrderNotFoundException} when the UUID does not match any order. */
     @Test
     @DisplayName("getOrderByUuid: throws when not found")
     void getOrderByUuid_notFound_throwsOrderNotFoundException() {
@@ -146,10 +179,9 @@ class OrderServiceImplTest {
                 .isInstanceOf(OrderNotFoundException.class);
     }
 
-    // ──────────────────────────────────────────────────────
-    // updateOrderStatus — buyer cancels
-    // ──────────────────────────────────────────────────────
+    // ── updateOrderStatus — buyer cancels ───────────────────────────────────
 
+    /** Buyers can cancel their own CREATED orders. */
     @Test
     @DisplayName("updateOrderStatus: buyer can cancel a CREATED order")
     void updateStatus_buyerCancels_success() {
@@ -162,6 +194,7 @@ class OrderServiceImplTest {
         assertThat(response.getStatus()).isEqualTo("CANCELLED");
     }
 
+    /** Buyers cannot cancel orders owned by a different buyer. */
     @Test
     @DisplayName("updateOrderStatus: buyer cannot cancel another buyer's order")
     void updateStatus_buyerWrongOwner_throwsOrderAccessException() {
@@ -174,6 +207,7 @@ class OrderServiceImplTest {
                 .hasMessageContaining("your own order");
     }
 
+    /** Buyers may only cancel or request a return; other transitions are rejected. */
     @Test
     @DisplayName("updateOrderStatus: buyer can only use CANCELLED — not SHIPPED")
     void updateStatus_buyerSetShipped_throwsOrderStateException() {
@@ -186,12 +220,11 @@ class OrderServiceImplTest {
                 .hasMessageContaining("only cancel or request return");
     }
 
-    // ──────────────────────────────────────────────────────
-    // updateOrderStatus — admin advances
-    // ──────────────────────────────────────────────────────
+    // ── updateOrderStatus — admin advances ──────────────────────────────────
 
+    /** Admin can advance a CREATED order to CONFIRMED. */
     @Test
-    @DisplayName("updateOrderStatus: admin advances CREATED → CONFIRMED")
+    @DisplayName("updateOrderStatus: admin advances CREATED \u2192 CONFIRMED")
     void updateStatus_adminConfirms_success() {
         when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid"))
                 .thenReturn(Optional.of(sampleOrder));
@@ -202,8 +235,9 @@ class OrderServiceImplTest {
         assertThat(response.getStatus()).isEqualTo("CONFIRMED");
     }
 
+    /** Invalid admin transitions (e.g. CREATED \u2192 SHIPPED) are rejected. */
     @Test
-    @DisplayName("updateOrderStatus: admin invalid transition CREATED → SHIPPED throws")
+    @DisplayName("updateOrderStatus: admin invalid transition CREATED \u2192 SHIPPED throws")
     void updateStatus_adminInvalidTransition_throwsOrderStateException() {
         when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid"))
                 .thenReturn(Optional.of(sampleOrder));
@@ -214,8 +248,9 @@ class OrderServiceImplTest {
                 .hasMessageContaining("Invalid transition");
     }
 
+    /** Sellers can advance CONFIRMED\u2192SHIPPED and SHIPPED\u2192DELIVERED. */
     @Test
-    @DisplayName("updateOrderStatus: seller can advance CONFIRMED→SHIPPED and SHIPPED→DELIVERED")
+    @DisplayName("updateOrderStatus: seller can advance CONFIRMED\u2192SHIPPED and SHIPPED\u2192DELIVERED")
     void sellerShippingFlow() {
         sampleOrder.setStatus(OrderStatus.CONFIRMED);
         when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid")).thenReturn(Optional.of(sampleOrder));
@@ -228,6 +263,7 @@ class OrderServiceImplTest {
         assertThat(r2.getStatus()).isEqualTo("DELIVERED");
     }
 
+    /** Admin can issue a refund after RETURN_RECEIVED. */
     @Test
     @DisplayName("updateOrderStatus: admin can issue REFUND_ISSUED after RETURN_RECEIVED")
     void adminRefunds() {
@@ -238,10 +274,9 @@ class OrderServiceImplTest {
         assertThat(r.getStatus()).isEqualTo("REFUND_ISSUED");
     }
 
-    // ──────────────────────────────────────────────────────
-    // updatePaymentStatus
-    // ──────────────────────────────────────────────────────
+    // ── updatePaymentStatus ─────────────────────────────────────────────────
 
+    /** A FAILED payment automatically cancels the order. */
     @Test
     @DisplayName("updatePaymentStatus: FAILED payment cancels order")
     void updatePaymentStatus_failed_cancelsOrder() {
@@ -255,6 +290,7 @@ class OrderServiceImplTest {
         assertThat(sampleOrder.getPaymentStatus()).isEqualTo(PaymentStatus.FAILED);
     }
 
+    /** A SUCCESS payment does not alter the order status. */
     @Test
     @DisplayName("updatePaymentStatus: SUCCESS does not cancel order")
     void updatePaymentStatus_success_doesNotCancelOrder() {
@@ -268,8 +304,9 @@ class OrderServiceImplTest {
         assertThat(sampleOrder.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
     }
 
-    // Additional edge case tests
+    // ── Additional edge-case tests ──────────────────────────────────────────
 
+    /** Orders containing items from different sellers are created successfully. */
     @Test
     @DisplayName("createOrder: multiple items with different sellers")
     void createOrder_multipleSellerItems() {
@@ -302,6 +339,7 @@ class OrderServiceImplTest {
         verify(productServiceClient).reduceStock("prod-uuid-2", 1);
     }
 
+    /** An empty items list is rejected before any external call. */
     @Test
     @DisplayName("createOrder: empty items list fails")
     void createOrder_emptyItems_throwsException() {
@@ -314,6 +352,7 @@ class OrderServiceImplTest {
         verifyNoInteractions(productServiceClient, orderRepository);
     }
 
+    /** Ensures all order fields are correctly mapped into the response DTO. */
     @Test
     @DisplayName("getOrderByUuid: returns order details correctly mapped")
     void getOrderByUuid_mapsAllFields() {
@@ -328,6 +367,7 @@ class OrderServiceImplTest {
         assertThat(response.getPaymentStatus()).isEqualTo("PENDING");
     }
 
+    /** Payment-status update on a non-existent order raises {@link OrderNotFoundException}. */
     @Test
     @DisplayName("updatePaymentStatus: order not found throws exception")
     void updatePaymentStatus_orderNotFound() {

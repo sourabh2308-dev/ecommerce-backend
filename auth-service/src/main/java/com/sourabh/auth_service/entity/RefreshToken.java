@@ -5,6 +5,15 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
+/**
+ * JPA entity representing a refresh token stored in the
+ * {@code refresh_token} database table.
+ *
+ * <p>Each token is linked to a specific user via {@code userUuid}, carries
+ * an expiry date, and a revocation flag.  The auth-service uses a
+ * token-rotation pattern: when a refresh token is exchanged for a new pair,
+ * the old token is marked as revoked.</p>
+ */
 @Entity
 @Getter
 @Setter
@@ -13,80 +22,24 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class RefreshToken {
 
+    /** Auto-generated primary key. */
     @Id
-    // Database column mapping
-    // @Id - JPA persistence configuration
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
-    // Database column mapping
-    // @GeneratedValue - JPA persistence configuration
     private Long id;
 
-    /**
-
-
-     * DATABASE COLUMN MAPPING
-
-
-     * 
-
-
-     * @Column configures how this field maps to database column:
-
-
-     * - name: Actual column name in table (default: field name in snake_case)
-
-
-     * - nullable: Can be NULL in database (default: true)
-
-
-     * - unique: Enforces uniqueness constraint (default: false)
-
-
-     * - length: Max length for VARCHAR columns (default: 255)
-
-
-     * - updatable: Can be modified after insert (default: true)
-
-
-     * - insertable: Included in INSERT statements (default: true)
-
-
-     * 
-
-
-     * JPA auto-generates SQL schema based on these annotations.
-
-
-     */
-
-
+    /** Unique, randomly generated UUID token value. */
     @Column(nullable = false, unique = true)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String token;
 
+    /** UUID of the user who owns this refresh token. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private String userUuid;
 
+    /** Date/time after which this token is no longer valid. */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private LocalDateTime expiryDate;
 
+    /** Whether this token has been revoked (logout or rotation). */
     @Column(nullable = false)
-    // Database column mapping
-    // @Column - JPA persistence configuration
-    // Database column mapping
-    // @Column - JPA persistence configuration
     private boolean revoked;
 }

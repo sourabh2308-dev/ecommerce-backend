@@ -18,14 +18,36 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Implementation of {@link CartService} for shopping-cart management.
+ *
+ * <p>Cart items are stored in the {@code cart_items} table, linked to a
+ * {@link User} via a foreign key. When the same product is added twice,
+ * the existing row's quantity and price are updated rather than inserting
+ * a duplicate.</p>
+ *
+ * <p>The cart response always includes computed fields:
+ * <ul>
+ *   <li>{@code subtotal} per item (price &times; quantity)</li>
+ *   <li>{@code totalItems} &ndash; number of distinct items</li>
+ *   <li>{@code totalAmount} &ndash; sum of all subtotals</li>
+ * </ul></p>
+ *
+ * @see CartService
+ * @see CartItemRepository
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class CartServiceImpl implements CartService {
 
+    /** Repository for {@link CartItem} persistence operations. */
     private final CartItemRepository cartItemRepository;
+
+    /** Repository for {@link User} lookups. */
     private final UserRepository userRepository;
 
+    /** {@inheritDoc} */
     @Override
     @Transactional(readOnly = true)
     public CartResponse getCart(String userUuid) {
@@ -34,6 +56,7 @@ public class CartServiceImpl implements CartService {
         return buildCartResponse(items);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public CartResponse addToCart(String userUuid, CartItemRequest request) {
@@ -63,6 +86,7 @@ public class CartServiceImpl implements CartService {
         return getCart(userUuid);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public CartResponse updateCartItem(String userUuid, Long itemId, int quantity) {
@@ -80,6 +104,7 @@ public class CartServiceImpl implements CartService {
         return getCart(userUuid);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public CartResponse removeFromCart(String userUuid, Long itemId) {
@@ -90,6 +115,7 @@ public class CartServiceImpl implements CartService {
         return getCart(userUuid);
     }
 
+    /** {@inheritDoc} */
     @Override
     @Transactional
     public void clearCart(String userUuid) {
@@ -98,11 +124,24 @@ public class CartServiceImpl implements CartService {
         log.info("Cart cleared: userUuid={}", userUuid);
     }
 
+    /**
+     * Looks up a {@link User} by UUID or throws {@link UserNotFoundException}.
+     *
+     * @param userUuid the UUID to search for
+     * @return the matching {@link User} entity
+     */
     private User findUser(String userUuid) {
         return userRepository.findByUuid(userUuid)
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
     }
 
+    /**
+     * Builds a complete {@link CartResponse} from a list of {@link CartItem} entities,
+     * computing per-item subtotals and the overall total amount.
+     *
+     * @param items the cart items to include
+     * @return the assembled cart response
+     */
     private CartResponse buildCartResponse(List<CartItem> items) {
         List<CartItemResponse> responses = items.stream()
                 .map(item -> CartItemResponse.builder()
