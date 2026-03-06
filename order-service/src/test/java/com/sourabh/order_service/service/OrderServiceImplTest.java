@@ -5,8 +5,10 @@ import com.sourabh.order_service.dto.request.CreateOrderRequest;
 import com.sourabh.order_service.dto.request.OrderItemRequest;
 import com.sourabh.order_service.dto.response.OrderResponse;
 import com.sourabh.order_service.entity.Order;
+import com.sourabh.order_service.entity.OrderItem;
 import com.sourabh.order_service.entity.OrderStatus;
 import com.sourabh.order_service.entity.PaymentStatus;
+import com.sourabh.order_service.entity.ReturnType;
 import com.sourabh.order_service.exception.OrderAccessException;
 import com.sourabh.order_service.exception.OrderNotFoundException;
 import com.sourabh.order_service.exception.OrderStateException;
@@ -252,8 +254,7 @@ class OrderServiceImplTest {
     @Test
     @DisplayName("updateOrderStatus: seller can advance CONFIRMED\u2192SHIPPED and SHIPPED\u2192DELIVERED")
     void sellerShippingFlow() {
-        sampleOrder.setStatus(OrderStatus.CONFIRMED);
-        when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid")).thenReturn(Optional.of(sampleOrder));
+        sampleOrder.setStatus(OrderStatus.CONFIRMED);        sampleOrder.setItems(List.of(OrderItem.builder().sellerUuid("seller-uuid").build()));        when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid")).thenReturn(Optional.of(sampleOrder));
         when(orderRepository.save(any())).thenReturn(sampleOrder);
         OrderResponse r1 = orderService.updateOrderStatus("order-uuid", "SELLER", "seller-uuid", "SHIPPED", null, null);
         assertThat(r1.getStatus()).isEqualTo("SHIPPED");
@@ -268,6 +269,7 @@ class OrderServiceImplTest {
     @DisplayName("updateOrderStatus: admin can issue REFUND_ISSUED after RETURN_RECEIVED")
     void adminRefunds() {
         sampleOrder.setStatus(OrderStatus.RETURN_RECEIVED);
+        sampleOrder.setReturnType(ReturnType.REFUND);
         when(orderRepository.findByUuidAndIsDeletedFalse("order-uuid")).thenReturn(Optional.of(sampleOrder));
         when(orderRepository.save(any())).thenReturn(sampleOrder);
         OrderResponse r = orderService.updateOrderStatus("order-uuid", "ADMIN", null, "REFUND_ISSUED", null, null);
