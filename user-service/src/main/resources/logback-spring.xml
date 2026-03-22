@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--
+        Structured JSON logging using logstash-logback-encoder.
+        MDC fields (traceId, spanId, correlationId) are included automatically.
+    -->
+
+    <springProperty scope="context" name="appName" source="spring.application.name"/>
+
+    <!-- ═══════════════════════════════════════════════════════
+         CONSOLE APPENDER  (used in development / local profile)
+    ════════════════════════════════════════════════════════ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${appName}"}</customFields>
+            <fieldNames>
+                <timestamp>timestamp</timestamp>
+                <message>message</message>
+                <logger>logger</logger>
+                <thread>thread</thread>
+                <level>level</level>
+                <levelValue>[ignore]</levelValue>
+            </fieldNames>
+            <!-- Include MDC fields: traceId, spanId, correlationId -->
+            <includeMdc>true</includeMdc>
+        </encoder>
+    </appender>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PROFILE: local  → human-readable pattern
+    ════════════════════════════════════════════════════════ -->
+    <springProfile name="local">
+        <appender name="READABLE_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}][%X{correlationId:-}] %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="READABLE_CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PROFILE: default / docker / prod  → JSON
+    ════════════════════════════════════════════════════════ -->
+    <springProfile name="!local">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+</configuration>

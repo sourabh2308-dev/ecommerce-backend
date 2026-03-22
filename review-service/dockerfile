@@ -1,0 +1,74 @@
+# ---------------------------------------------------------------
+# review-service Dockerfile — Multi-Stage Build
+# ---------------------------------------------------------------
+# Produces a lean production image for the review-service micro-
+# service, which manages product reviews and ratings. The service
+# verifies purchases via Feign (order-service), publishes
+# ReviewSubmittedEvent to Kafka, and uses Redis for caching.
+#
+# Build:  docker build -t review-service .
+# Run:    docker run -p 8080:8080 review-service
+#         (typically launched via docker-compose.yml)
+# ---------------------------------------------------------------
+
+# ---------------------------------------------------------------
+# Stage 1: Build
+# ---------------------------------------------------------------
+# Uses Maven 3.9 with Eclipse Temurin JDK 17 on Alpine Linux to
+# compile the review-service module. Alpine keeps the builder
+# image small (~5 MB base layer).
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+
+# All subsequent commands run inside /workspace.
+WORKDIR /workspace
+
+# Copy every module POM first so that dependency resolution is
+# cached as a Docker layer. Rebuilds that only touch source code
+# skip the expensive "download the internet" step.
+COPY pom.xml .
+COPY api-gateway/pom.xml api-gateway/
+COPY auth-service/pom.xml auth-service/
+COPY user-service/pom.xml user-service/
+COPY product-service/pom.xml product-service/
+COPY order-service/pom.xml order-service/
+COPY review-service/pom.xml review-service/
+COPY payment-service/pom.xml payment-service/
+COPY eureka-server/pom.xml eureka-server/
+COPY config-server/pom.xml config-server/
+
+# Pre-fetch dependencies for the review-service module only.
+# "|| true" prevents a build failure when optional deps are
+# unavailable in the repository.
+RUN mvn -pl review-service dependency:go-offline -B --no-transfer-progress || true
+
+# Copy source code after dependency download so that source-only
+# changes benefit from the cached dependency layer above.
+COPY review-service/src review-service/src
+
+# Compile, run annotation processors, and package the fat JAR.
+# Tests are skipped here; they run separately in CI.
+RUN mvn -pl review-service package -DskipTests -B --no-transfer-progress
+
+# ---------------------------------------------------------------
+# Stage 2: Runtime
+# ---------------------------------------------------------------
+# Uses the JRE-only Temurin image (no compiler) on Alpine to
+# produce a lean production image (~150 MB vs ~500 MB for a
+# full JDK + Maven image).
+FROM eclipse-temurin:17-jre-alpine
+
+WORKDIR /app
+
+# Copy the fat JAR produced by Stage 1 and rename it to a
+# generic name so the ENTRYPOINT stays stable across versions.
+COPY --from=builder /workspace/review-service/target/*.jar app.jar
+
+# Document the port the Spring Boot application listens on.
+# Actual publishing is handled by docker-compose / -p flag.
+EXPOSE 8080
+
+# Exec form ensures the Java process runs as PID 1 and receives
+# SIGTERM for graceful shutdown. Spring Boot picks up environment
+# variables (datasource URL, Kafka brokers, Redis host, Eureka,
+# etc.) at startup from docker-compose environment entries.
+ENTRYPOINT ["java", "-jar", "app.jar"]

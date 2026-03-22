@@ -1,0 +1,85 @@
+# =============================================================================
+# Prometheus Scrape Configuration — E-Commerce Platform
+# =============================================================================
+# Defines how often Prometheus collects metrics and which service endpoints
+# to scrape.  Every Spring Boot service exposes Micrometer metrics at
+# /actuator/prometheus (enabled by spring-boot-starter-actuator + micrometer
+# prometheus registry).
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Global settings — apply to all scrape jobs unless overridden.
+# ---------------------------------------------------------------------------
+global:
+  # How frequently Prometheus pulls metrics from each target
+  scrape_interval: 15s
+  # How frequently Prometheus evaluates alerting / recording rules
+  evaluation_interval: 15s
+
+# ---------------------------------------------------------------------------
+# Scrape jobs — one per microservice / infrastructure component.
+# ---------------------------------------------------------------------------
+scrape_configs:
+
+  # --- API Gateway (Spring Cloud Gateway) ---
+  # Central entry-point; exposes route-level and rate-limit metrics.
+  - job_name: 'api-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['api-gateway:8080']
+
+  # --- Auth Service ---
+  # Tracks login attempts, token issuance, and password-reset metrics.
+  - job_name: 'auth-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['auth-service:8080']
+
+  # --- User Service ---
+  # Monitors user profile CRUD operations and cache hit/miss rates.
+  - job_name: 'user-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['user-service:8080']
+
+  # --- Product Service ---
+  # Covers product catalog queries, Elasticsearch indexing, and Kafka publishing.
+  - job_name: 'product-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['product-service:8080']
+
+  # --- Order Service ---
+  # Captures order placement throughput, status transitions, and Kafka consumer lag.
+  - job_name: 'order-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['order-service:8080']
+
+  # --- Review Service ---
+  # Tracks review submission rates and moderation queue depth.
+  - job_name: 'review-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['review-service:8080']
+
+  # --- Payment Service ---
+  # Monitors payment initiation, gateway callbacks, and success/failure ratios.
+  - job_name: 'payment-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['payment-service:8080']
+
+  # --- Eureka Server (Service Registry) ---
+  # Exposes registry size, heartbeat counts, and self-preservation status.
+  - job_name: 'eureka-server'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['eureka-server:8761']
+
+  # --- Config Server (Centralized Configuration) ---
+  # Reports configuration fetch counts and environment resolution metrics.
+  - job_name: 'config-server'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['config-server:8888']

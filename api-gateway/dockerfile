@@ -1,0 +1,48 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# API Gateway — Multi-Stage Dockerfile
+#
+# Produces a minimal, production-ready Docker image for the Spring Cloud
+# Gateway microservice using a two-stage build:
+#   Stage 1 (builder) — compiles the source and packages a fat JAR with Maven.
+#   Stage 2 (runtime) — copies only the JAR onto a slim JRE-Alpine image.
+#
+# Final image size ≈ 150 MB  (vs ≈ 500 MB for a single-stage JDK build).
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Stage 1: Build ───────────────────────────────────────────────────────────
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+WORKDIR /workspace
+
+# Copy POM files first to leverage Docker layer caching for dependencies.
+# If only source code changes, the dependency layer is reused.
+COPY pom.xml .
+COPY api-gateway/pom.xml         api-gateway/
+COPY auth-service/pom.xml        auth-service/
+COPY user-service/pom.xml        user-service/
+COPY product-service/pom.xml     product-service/
+COPY order-service/pom.xml       order-service/
+COPY review-service/pom.xml      review-service/
+COPY payment-service/pom.xml     payment-service/
+COPY eureka-server/pom.xml       eureka-server/
+COPY config-server/pom.xml       config-server/
+
+# Download dependencies (cached unless a POM changes).
+RUN mvn -pl api-gateway dependency:go-offline -B --no-transfer-progress || true
+
+# Copy source code and build the fat JAR (tests skipped — run in CI).
+COPY api-gateway/src api-gateway/src
+RUN mvn -pl api-gateway package -DskipTests -B --no-transfer-progress
+
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+
+# Bring only the packaged JAR from the builder stage.
+COPY --from=builder /workspace/api-gateway/target/*.jar app.jar
+
+# Document the port the Netty server listens on.
+EXPOSE 8080
+
+# Launch the application. Environment variables (datasource URLs, secrets,
+# Eureka endpoints, etc.) are injected by docker-compose.yml at runtime.
+ENTRYPOINT ["java", "-jar", "app.jar"]

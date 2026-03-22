@@ -1,0 +1,26 @@
+-- =============================================================================
+-- USER-SERVICE DATABASE SCHEMA
+-- =============================================================================
+--
+-- This file exists for documentation purposes only.
+--
+-- Schema creation strategy:
+--   The application relies on Hibernate's `spring.jpa.hibernate.ddl-auto=update`
+--   property (configured in application.properties) to automatically create and
+--   evolve the database schema at startup.  Hibernate inspects the JPA entity
+--   classes under `com.sourabh.user_service.entity` and issues the appropriate
+--   DDL statements against the PostgreSQL `user_db` database.
+--
+-- Tables managed by JPA (auto-created):
+--   * users              – core user accounts (buyers, sellers, admins)
+--   * addresses           – shipping / billing addresses per user
+--   * cart_items           – shopping-cart line items
+--   * wishlist_items       – saved-for-later products
+--   * loyalty_transactions – points earned / redeemed per order
+--   * notifications        – in-app notification inbox
+--   * support_tickets      – customer-support tickets
+--   * ticket_messages      – messages within a support ticket
+--   * otp_verifications    – time-limited OTP codes for email verification
+--
+-- Flyway is explicitly disabled (spring.flyway.enabled=false).
+-- =============================================================================

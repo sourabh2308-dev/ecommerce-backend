@@ -1,0 +1,93 @@
+# =============================================================================
+# USER-SERVICE MICROSERVICE — MULTI-STAGE DOCKERFILE
+# =============================================================================
+#
+# Builds an optimised, production-ready container image for user-service using
+# a two-stage approach:
+#
+#   Stage 1 (builder) — Maven 3.9 + JDK 17 on Alpine Linux
+#     Resolves dependencies, compiles Java sources, and packages the
+#     executable Spring Boot fat-JAR.
+#
+#   Stage 2 (runtime) — Eclipse Temurin JRE 17 on Alpine Linux
+#     Copies only the fat-JAR from the builder stage and runs it.
+#     No build tools, source code, or intermediate artefacts are included.
+#
+# Image size comparison:
+#   Single-stage (JDK + Maven + src): ~500 MB
+#   Multi-stage  (JRE + JAR only)   : ~150 MB   ← ~350 MB saved per service
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# STAGE 1 — BUILD
+# -----------------------------------------------------------------------------
+# Alpine-based Maven image with Eclipse Temurin JDK 17.
+# Named "builder" so the runtime stage can COPY artefacts from it.
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+
+# All subsequent commands execute relative to /workspace.
+WORKDIR /workspace
+
+# -- Dependency resolution (Docker layer cache optimisation) ------------------
+# pom.xml files are copied FIRST so that `dependency:go-offline` is cached
+# as long as no POM changes.  Source-code changes alone do NOT invalidate
+# this expensive layer.
+
+# Root (parent) POM — defines dependency-management and plugin versions.
+COPY pom.xml .
+
+# Module POMs — Maven's reactor needs all sibling modules to resolve the
+# multi-module project graph, even though only user-service is built.
+COPY api-gateway/pom.xml api-gateway/
+COPY auth-service/pom.xml auth-service/
+COPY user-service/pom.xml user-service/
+COPY product-service/pom.xml product-service/
+COPY order-service/pom.xml order-service/
+COPY review-service/pom.xml review-service/
+COPY payment-service/pom.xml payment-service/
+COPY eureka-server/pom.xml eureka-server/
+COPY config-server/pom.xml config-server/
+
+# Download all declared dependencies into the local Maven repository.
+#   -pl user-service        → build only this module
+#   -B                      → batch / non-interactive mode
+#   --no-transfer-progress  → suppress noisy download bars (cleaner CI logs)
+#   || true                 → do not fail if optional deps are unavailable
+RUN mvn -pl user-service dependency:go-offline -B --no-transfer-progress || true
+
+# -- Source compilation -------------------------------------------------------
+# Copied AFTER dependency resolution so source-only changes reuse the cached
+# dependency layer.
+COPY user-service/src user-service/src
+
+# Compile, run annotation processors, and package the fat-JAR.
+#   -DskipTests  → unit tests are executed in CI, not during image build
+# Output: user-service/target/user-service-*.jar
+RUN mvn -pl user-service package -DskipTests -B --no-transfer-progress
+
+# -----------------------------------------------------------------------------
+# STAGE 2 — RUNTIME
+# -----------------------------------------------------------------------------
+# JRE-only Alpine image (no compiler, no Maven).  Eclipse Temurin is the
+# Adoptium OpenJDK distribution — free and production-grade.
+FROM eclipse-temurin:17-jre-alpine
+
+# Application files live under /app in the runtime container.
+WORKDIR /app
+
+# Copy the fat-JAR from the builder stage and rename to a stable name so
+# ENTRYPOINT does not depend on the artifact version string.
+COPY --from=builder /workspace/user-service/target/*.jar app.jar
+
+# Declare the port the Spring Boot application listens on.
+# This is documentation metadata — actual port publishing is handled by
+# docker-compose or the `docker run -p` flag.
+EXPOSE 8080
+
+# Start the application using exec form so the JVM runs as PID 1 and
+# receives OS signals (SIGTERM) directly for graceful shutdown.
+# Runtime configuration (datasource URL, Kafka brokers, Redis host, JWT
+# secret, etc.) is injected via environment variables defined in
+# docker-compose.yml.
+ENTRYPOINT ["java", "-jar", "app.jar"]

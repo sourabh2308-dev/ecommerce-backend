@@ -1,0 +1,13 @@
+-- ═══════════════════════════════════════════════════════════════════
+-- Payment Service Schema
+-- ═══════════════════════════════════════════════════════════════════
+-- This file is for documentation purposes.  Hibernate validates the
+-- schema at startup (ddl-auto=validate) but does NOT create or alter
+-- tables.  The actual DDL is managed by the init.sql script that
+-- runs when the PostgreSQL container is first provisioned.
+--
+-- Tables:
+--   payments         — top-level payment records keyed by UUID
+--   payment_splits   — per-seller revenue splits linked to a payment
+--   processed_events — idempotency log for Kafka event consumption
+-- ═══════════════════════════════════════════════════════════════════

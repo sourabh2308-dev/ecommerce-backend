@@ -1,0 +1,71 @@
+# =============================================================================
+# Dockerfile — order-service (multi-stage build)
+# =============================================================================
+# Produces a minimal production image for the Order Service microservice.
+#
+# Stage 1 (builder) : Compiles Java sources with Maven 3.9 / JDK 17 on Alpine
+#                      and packages the executable Spring Boot JAR.
+# Stage 2 (runtime) : Copies only the JAR onto a JRE-17 Alpine base image,
+#                      yielding an image roughly 70 % smaller than a single-stage
+#                      build (~150 MB vs ~500 MB).
+#
+# Layer caching strategy:
+#   POM files are copied first so that dependency resolution is cached
+#   independently of source-code changes, dramatically speeding up rebuilds.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1 — Build
+# -----------------------------------------------------------------------------
+# Maven 3.9 with Temurin JDK 17 on Alpine Linux provides a compact build env.
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+
+# All build operations happen inside /workspace.
+WORKDIR /workspace
+
+# --- Dependency layer (cached unless a POM changes) --------------------------
+# Copy the parent POM and every module POM so Maven can resolve the reactor.
+COPY pom.xml .
+COPY api-gateway/pom.xml api-gateway/
+COPY auth-service/pom.xml auth-service/
+COPY user-service/pom.xml user-service/
+COPY product-service/pom.xml product-service/
+COPY order-service/pom.xml order-service/
+COPY review-service/pom.xml review-service/
+COPY payment-service/pom.xml payment-service/
+COPY eureka-server/pom.xml eureka-server/
+COPY config-server/pom.xml config-server/
+
+# Pre-download dependencies for the order-service module.
+# "|| true" tolerates optional / snapshot deps that may not resolve offline.
+RUN mvn -pl order-service dependency:go-offline -B --no-transfer-progress || true
+
+# --- Compilation layer -------------------------------------------------------
+# Source is copied after the dependency layer so that code-only changes do not
+# invalidate the expensive dependency-download cache.
+COPY order-service/src order-service/src
+
+# Package the application (tests are executed separately in CI).
+RUN mvn -pl order-service package -DskipTests -B --no-transfer-progress
+
+# -----------------------------------------------------------------------------
+# Stage 2 — Runtime
+# -----------------------------------------------------------------------------
+# Temurin JRE 17 on Alpine: production-grade OpenJDK runtime with minimal footprint.
+FROM eclipse-temurin:17-jre-alpine
+
+# Application root inside the container.
+WORKDIR /app
+
+# Copy the fat JAR produced by the builder stage; all other build artefacts
+# (source code, Maven cache, JDK) are discarded.
+COPY --from=builder /workspace/order-service/target/*.jar app.jar
+
+# Document the listening port (actual publishing is handled by docker-compose).
+EXPOSE 8080
+
+# Exec-form entrypoint ensures the JVM receives OS signals (e.g. SIGTERM)
+# directly, enabling graceful shutdown orchestrated by Spring Boot.
+# Runtime configuration (datasource, Kafka, Eureka, Redis, JWT secrets) is
+# injected via environment variables defined in docker-compose.yml.
+ENTRYPOINT ["java", "-jar", "app.jar"]

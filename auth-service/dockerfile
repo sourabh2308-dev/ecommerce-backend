@@ -1,0 +1,57 @@
+# ──────────────────────────────────────────────────────────────
+# Auth Service – Multi-Stage Dockerfile
+# ──────────────────────────────────────────────────────────────
+# Stage 1 (builder): compiles Java source and packages the JAR.
+# Stage 2 (runtime): runs the JAR on a minimal JRE image.
+# Multi-stage builds keep the final image small (~150 MB vs
+# ~500 MB) by discarding Maven, the JDK, and source code.
+# ──────────────────────────────────────────────────────────────
+
+# ── Stage 1: Build ───────────────────────────────────────────
+# Maven 3.9 + Eclipse Temurin JDK 17 on Alpine Linux.
+# "AS builder" names the stage so it can be referenced later.
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+
+# All subsequent commands execute in /workspace.
+WORKDIR /workspace
+
+# Copy POM files first so dependency downloads are cached in a
+# separate Docker layer.  If only source code changes, Maven
+# will not re-download dependencies on rebuild.
+COPY pom.xml .
+COPY api-gateway/pom.xml api-gateway/
+COPY auth-service/pom.xml auth-service/
+COPY user-service/pom.xml user-service/
+COPY product-service/pom.xml product-service/
+COPY order-service/pom.xml order-service/
+COPY review-service/pom.xml review-service/
+COPY payment-service/pom.xml payment-service/
+COPY eureka-server/pom.xml eureka-server/
+COPY config-server/pom.xml config-server/
+
+# Download dependencies for the auth-service module.
+# -pl selects only this module; -B enables batch mode.
+RUN mvn -pl auth-service dependency:go-offline -B --no-transfer-progress || true
+
+# Copy application source code (after deps for cache efficiency).
+COPY auth-service/src auth-service/src
+
+# Compile and package the application JAR, skipping tests
+# (tests are run separately in CI).
+RUN mvn -pl auth-service package -DskipTests -B --no-transfer-progress
+
+# ── Stage 2: Runtime ─────────────────────────────────────────
+# Eclipse Temurin JRE 17 on Alpine — no JDK, no Maven.
+FROM eclipse-temurin:17-jre-alpine
+
+WORKDIR /app
+
+# Copy only the packaged JAR from the builder stage.
+COPY --from=builder /workspace/auth-service/target/*.jar app.jar
+
+# Document the port the service listens on (does not publish it).
+EXPOSE 8080
+
+# Exec-form ENTRYPOINT ensures Java receives OS signals (e.g.
+# SIGTERM for graceful shutdown) and runs as PID 1.
+ENTRYPOINT ["java", "-jar", "app.jar"]
